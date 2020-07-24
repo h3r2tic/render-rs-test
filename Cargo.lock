@@ -1269,8 +1269,7 @@ dependencies = [
 [[package]]
 name = "spirv-reflect"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cecc7af6a7d3ca6d15f4d6b5077df89c77ad1f4b314d0cabee221656d041dad7"
+source = "git+https://github.com/h3r2tic/spirv-reflect-rs.git?rev=47636b8#47636b8053d4014b429c3bc40d2a08c3bf2cdf54"
 dependencies = [
  "bitflags",
  "cc",

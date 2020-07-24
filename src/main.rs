@@ -5,19 +5,13 @@ use render_core::device::*;
 use render_core::handles::*;
 use render_core::{
     encoder::RenderCommandList,
-    state::{
-        build, RenderBindingUnorderedAccessView, RenderBindingView, RenderComputePipelineStateDesc,
-    },
+    state::{build, RenderComputePipelineStateDesc},
     system::*,
-    types::{
-        RenderBindFlags, RenderFormat, RenderResourceType, RenderShaderArgument, RenderShaderDesc,
-        RenderShaderParameter, RenderShaderSignatureDesc, RenderShaderType, RenderShaderViewsDesc,
-        RenderSwapChainDesc, RenderSwapChainWindow, RenderTextureDesc,
-        RenderTextureSubResourceData, RenderTextureType, RenderViewDimension,
-    },
+    types::*,
 };
 //use render_core::types::*;
 //use render_core::utilities::*;
+use std::collections::VecDeque;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -49,21 +43,31 @@ pub fn get_render_module_path() -> PathBuf {
     path
 }
 
-pub struct SystemHarness {
+pub struct Renderer {
     pub render_system: RenderSystem,
     pub device_info: Arc<Vec<RenderDeviceInfo>>,
     pub handles: Arc<RwLock<RenderResourceHandleAllocator>>,
     pub device: Arc<RwLock<Option<Box<dyn RenderDevice>>>>,
 }
 
-impl SystemHarness {
+impl Renderer {
     pub fn allocate_handle(&self, kind: RenderResourceType) -> RenderResourceHandle {
         self.handles.write().unwrap().allocate(kind)
     }
 
-    pub fn new() -> SystemHarness {
+    pub fn allocate_frame_handle(
+        &self,
+        kind: RenderResourceType,
+        frame_resources: &mut FrameResources,
+    ) -> RenderResourceHandle {
+        let handle = self.handles.write().unwrap().allocate(kind);
+        frame_resources.handles.push(handle);
+        handle
+    }
+
+    pub fn new() -> Renderer {
         let render_system = RenderSystem::new();
-        let mut harness = SystemHarness {
+        let mut harness = Renderer {
             render_system,
             device_info: Arc::new(Vec::new()),
             handles: Arc::new(RwLock::new(RenderResourceHandleAllocator::new())),
@@ -105,14 +109,28 @@ impl SystemHarness {
     }
 }
 
-impl Drop for SystemHarness {
+impl Drop for Renderer {
     fn drop(&mut self) {
         self.release();
     }
 }
 
+#[derive(Default)]
+pub struct FrameResources {
+    handles: Vec<RenderResourceHandle>,
+    submit_done_fence: RenderResourceHandle,
+}
+
+impl FrameResources {
+    pub fn destroy_now(self, device: &mut dyn RenderDevice) {
+        for handle in self.handles {
+            device.destroy_resource(handle).unwrap();
+        }
+    }
+}
+
 fn try_main() -> std::result::Result<(), failure::Error> {
-    let mut renderer = SystemHarness::new();
+    let mut renderer = Renderer::new();
 
     let render_system = &mut renderer.render_system;
     let registry = Arc::clone(&render_system.get_registry().unwrap());
@@ -192,7 +210,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
             &RenderSwapChainDesc {
                 width,
                 height,
-                format: RenderFormat::R32g32b32a32Float,
+                format: RenderFormat::R10g10b10a2Unorm,
                 buffer_count: 3,
                 window: match window.raw_window_handle() {
                     RawWindowHandle::Windows(handle) => RenderSwapChainWindow {
@@ -231,52 +249,96 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         "compute pipeline".into(),
     )?;
 
-    let shader_views = renderer.allocate_handle(RenderResourceType::ShaderViews);
-    device.create_shader_views(
-        shader_views,
-        &RenderShaderViewsDesc {
-            shader_resource_views: Vec::new(),
-            unordered_access_views: vec![build::texture_2d_rw(
-                output_texture,
-                RenderFormat::R32g32b32a32Float,
-                0,
-                0,
-            )],
-        },
-        "compute shader resource views".into(),
-    )?;
+    let mut retired_frames: VecDeque<Option<FrameResources>> = Default::default();
+    retired_frames.push_back(None);
+    retired_frames.push_back(None);
 
-    let main_command_list_handle = renderer.allocate_handle(RenderResourceType::CommandList);
-    device.create_command_list(main_command_list_handle, "Main command list".into())?;
+    for _ in 0..5 {
+        if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
+            device.wait_for_fence(frame_resources.submit_done_fence)?;
+            frame_resources.destroy_now(&mut **device);
+        }
 
-    let mut cb = RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
+        let mut frame_resources = FrameResources::default();
 
-    cb.dispatch_2d(
-        compute_pipeline,
-        &[RenderShaderArgument {
-            constant_buffer: None,
-            shader_views: Some(shader_views),
-            constant_buffer_offset: 0,
-        }],
-        width,
-        height,
-        Some(8),
-        Some(8),
-    )?;
+        let shader_views =
+            renderer.allocate_frame_handle(RenderResourceType::ShaderViews, &mut frame_resources);
 
-    device.compile_command_list(main_command_list_handle, &cb)?;
-    device.submit_command_list(main_command_list_handle, true, None, None)?;
+        device.create_shader_views(
+            shader_views,
+            &RenderShaderViewsDesc {
+                shader_resource_views: Vec::new(),
+                unordered_access_views: vec![build::texture_2d_rw(
+                    output_texture,
+                    RenderFormat::R32g32b32a32Float,
+                    0,
+                    0,
+                )],
+            },
+            "compute shader resource views".into(),
+        )?;
 
-    device.present_swap_chain(swapchain, output_texture)?;
-    device.advance_frame()?;
+        let main_command_list_handle =
+            renderer.allocate_frame_handle(RenderResourceType::CommandList, &mut frame_resources);
+        device.create_command_list(main_command_list_handle, "Main command list".into())?;
 
+        let mut cb =
+            RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
+
+        cb.dispatch_2d(
+            compute_pipeline,
+            &[RenderShaderArgument {
+                constant_buffer: None,
+                shader_views: Some(shader_views),
+                constant_buffer_offset: 0,
+            }],
+            width,
+            height,
+            Some(8),
+            Some(8),
+        )?;
+
+        let submit_done_fence =
+            renderer.allocate_frame_handle(RenderResourceType::Fence, &mut frame_resources);
+        device.create_fence(
+            submit_done_fence,
+            &RenderFenceDesc {
+                cross_device: false,
+            },
+            "submit done fence".into(),
+        )?;
+
+        device.compile_command_list(main_command_list_handle, &cb)?;
+        device.submit_command_list(
+            main_command_list_handle,
+            true,
+            None,
+            None,
+            Some(submit_done_fence),
+        )?;
+        frame_resources.submit_done_fence = submit_done_fence;
+
+        device.present_swap_chain(swapchain, output_texture)?;
+        device.advance_frame()?;
+
+        retired_frames.push_back(Some(frame_resources));
+        //std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    device.device_wait_idle()?;
+
+    for frame_resources in retired_frames.drain(..) {
+        if let Some(frame_resources) = frame_resources {
+            frame_resources.destroy_now(&mut **device);
+        }
+    }
+
+    device.destroy_resource(compute_shader)?;
+    device.destroy_resource(compute_pipeline)?;
     device.destroy_resource(output_texture)?;
-    device.destroy_resource(main_command_list_handle)?;
     device.destroy_resource(swapchain)?;
 
-    loop {}
-
-    //Ok(())
+    Ok(())
 }
 
 fn main() {

@@ -4,10 +4,16 @@ use render_core::device::*;
 //use render_core::encoder::*;
 use render_core::handles::*;
 use render_core::{
+    encoder::RenderCommandList,
+    state::{
+        build, RenderBindingUnorderedAccessView, RenderBindingView, RenderComputePipelineStateDesc,
+    },
     system::*,
     types::{
-        RenderBindFlags, RenderFormat, RenderResourceType, RenderSwapChainDesc,
-        RenderSwapChainWindow, RenderTextureDesc, RenderTextureSubResourceData, RenderTextureType,
+        RenderBindFlags, RenderFormat, RenderResourceType, RenderShaderArgument, RenderShaderDesc,
+        RenderShaderParameter, RenderShaderSignatureDesc, RenderShaderType, RenderShaderViewsDesc,
+        RenderSwapChainDesc, RenderSwapChainWindow, RenderTextureDesc,
+        RenderTextureSubResourceData, RenderTextureType, RenderViewDimension,
     },
 };
 //use render_core::types::*;
@@ -51,6 +57,10 @@ pub struct SystemHarness {
 }
 
 impl SystemHarness {
+    pub fn allocate_handle(&self, kind: RenderResourceType) -> RenderResourceHandle {
+        self.handles.write().unwrap().allocate(kind)
+    }
+
     pub fn new() -> SystemHarness {
         let render_system = RenderSystem::new();
         let mut harness = SystemHarness {
@@ -102,9 +112,9 @@ impl Drop for SystemHarness {
 }
 
 fn try_main() -> std::result::Result<(), failure::Error> {
-    let mut harness = SystemHarness::new();
+    let mut renderer = SystemHarness::new();
 
-    let render_system = &mut harness.render_system;
+    let render_system = &mut renderer.render_system;
     let registry = Arc::clone(&render_system.get_registry().unwrap());
     let registry_read = registry.read().unwrap();
 
@@ -122,7 +132,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         println!("{:#?}", info_list);
     }
 
-    let mut device = harness.device.write().unwrap();
+    let mut device = renderer.device.write().unwrap();
     let device = device.as_mut().expect("device");
 
     let width = 1280u32;
@@ -136,11 +146,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         .expect("window");
     let window = Arc::new(window);
 
-    let output_texture = harness
-        .handles
-        .write()
-        .unwrap()
-        .allocate(RenderResourceType::Texture);
+    let output_texture = renderer.allocate_handle(RenderResourceType::Texture);
 
     let initial_pixel_data_byte_count = width * height * 4 * 4;
     let initial_pixel_data: Vec<[f32; 4]> = (0..width * height)
@@ -164,7 +170,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         output_texture,
         &RenderTextureDesc {
             texture_type: RenderTextureType::Tex2d,
-            bind_flags: RenderBindFlags::NONE,
+            bind_flags: RenderBindFlags::UNORDERED_ACCESS,
             format: RenderFormat::R32g32b32a32Float,
             width,
             height,
@@ -177,11 +183,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
     )?;
 
     let swapchain = {
-        let swapchain = harness
-            .handles
-            .write()
-            .unwrap()
-            .allocate(RenderResourceType::SwapChain);
+        let swapchain = renderer.allocate_handle(RenderResourceType::SwapChain);
 
         use raw_window_handle::{HasRawWindowHandle as _, RawWindowHandle};
 
@@ -206,11 +208,75 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         swapchain
     };
 
+    let compute_shader = renderer.allocate_handle(RenderResourceType::Shader);
+    device.create_shader(
+        compute_shader,
+        &RenderShaderDesc {
+            shader_type: RenderShaderType::Compute,
+            shader_data: include_bytes!("../gradients.spv").as_ref().to_owned(),
+        },
+        "compute shader".into(),
+    )?;
+
+    let compute_pipeline = renderer.allocate_handle(RenderResourceType::ComputePipelineState);
+    device.create_compute_pipeline_state(
+        compute_pipeline,
+        &RenderComputePipelineStateDesc {
+            shader: compute_shader,
+            shader_signature: RenderShaderSignatureDesc::new(
+                &[RenderShaderParameter::new(0, 1)],
+                &[],
+            ),
+        },
+        "compute pipeline".into(),
+    )?;
+
+    let shader_views = renderer.allocate_handle(RenderResourceType::ShaderViews);
+    device.create_shader_views(
+        shader_views,
+        &RenderShaderViewsDesc {
+            shader_resource_views: Vec::new(),
+            unordered_access_views: vec![build::texture_2d_rw(
+                output_texture,
+                RenderFormat::R32g32b32a32Float,
+                0,
+                0,
+            )],
+        },
+        "compute shader resource views".into(),
+    )?;
+
+    let main_command_list_handle = renderer.allocate_handle(RenderResourceType::CommandList);
+    device.create_command_list(main_command_list_handle, "Main command list".into())?;
+
+    let mut cb = RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
+
+    cb.dispatch_2d(
+        compute_pipeline,
+        &[RenderShaderArgument {
+            constant_buffer: None,
+            shader_views: Some(shader_views),
+            constant_buffer_offset: 0,
+        }],
+        width,
+        height,
+        Some(8),
+        Some(8),
+    )?;
+
+    device.compile_command_list(main_command_list_handle, &cb)?;
+    device.submit_command_list(main_command_list_handle, true, None, None)?;
+
     device.present_swap_chain(swapchain, output_texture)?;
+    device.advance_frame()?;
+
+    device.destroy_resource(output_texture)?;
+    device.destroy_resource(main_command_list_handle)?;
+    device.destroy_resource(swapchain)?;
 
     loop {}
 
-    Ok(())
+    //Ok(())
 }
 
 fn main() {

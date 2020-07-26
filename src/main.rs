@@ -1,16 +1,13 @@
+mod rg;
+
+#[macro_use]
+mod rg_helper;
+use rg_helper::RgRenderCommandListExtension;
+
 use render_core::backend::*;
-//use render_core::commands::*;
 use render_core::device::*;
-//use render_core::encoder::*;
 use render_core::handles::*;
-use render_core::{
-    encoder::RenderCommandList,
-    state::{build, RenderComputePipelineStateDesc},
-    system::*,
-    types::*,
-};
-//use render_core::types::*;
-//use render_core::utilities::*;
+use render_core::{encoder::RenderCommandList, system::*, types::*};
 use std::collections::VecDeque;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -118,7 +115,7 @@ impl Drop for Renderer {
 #[derive(Default)]
 pub struct FrameResources {
     handles: Vec<RenderResourceHandle>,
-    submit_done_fence: RenderResourceHandle,
+    present_done_fence: RenderResourceHandle,
 }
 
 impl FrameResources {
@@ -127,6 +124,93 @@ impl FrameResources {
             device.destroy_resource(handle).unwrap();
         }
     }
+}
+
+fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::TextureHandle {
+    let mut pass = rg.begin_pass();
+    let (output, output_ref) = pass.create(desc);
+
+    pass.render(move |cb, registry| {
+        cb.rg_dispatch_2d(
+            registry.shader("gradients.spv", RenderShaderType::Compute),
+            output_ref.dims(),
+            &[RenderShaderArgument {
+                shader_views: Some(rg::shader_resource_views(
+                    registry,
+                    &[],
+                    &[("output_tex", rg::uav::texture_2d(output_ref))],
+                )),
+                constant_buffer: None,
+                constant_buffer_offset: 0,
+            }],
+        )
+    });
+
+    output
+}
+
+fn blur(rg: &mut rg::RenderGraph, input: &rg::TextureHandle) -> rg::TextureHandle {
+    let mut pass = rg.begin_pass();
+    let input_ref = pass.read(input);
+    let (output, output_ref) = pass.create(input.desc);
+
+    pass.render(move |cb, registry| {
+        cb.rg_dispatch_2d(
+            registry.shader("blur.spv", RenderShaderType::Compute),
+            input_ref.dims(),
+            &[RenderShaderArgument {
+                shader_views: Some(rg::shader_resource_views(
+                    registry,
+                    &[("input_tex", rg::srv::texture_2d(input_ref))],
+                    &[("output_tex", rg::uav::texture_2d(output_ref))],
+                )),
+                constant_buffer: None,
+                constant_buffer_offset: 0,
+            }],
+        )
+    });
+
+    output
+}
+
+fn into_ycbcr(rg: &mut rg::RenderGraph, mut input: rg::TextureHandle) -> rg::TextureHandle {
+    let mut pass = rg.begin_pass();
+    let input_ref = pass.write(&mut input);
+
+    pass.render(move |cb, registry| {
+        cb.rg_dispatch_2d(
+            registry.shader("into_ycbcr.spv", RenderShaderType::Compute),
+            input_ref.dims(),
+            &[RenderShaderArgument {
+                shader_views: Some(rg::shader_resource_views(
+                    registry,
+                    &[],
+                    &[("input_tex", rg::uav::texture_2d(input_ref))],
+                )),
+                constant_buffer: None,
+                constant_buffer_offset: 0,
+            }],
+        )
+    });
+
+    input
+}
+
+fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
+    let mut rg = rg::RenderGraph::new();
+
+    let tex = synth_gradients(
+        &mut rg,
+        rg::TextureDesc {
+            width: 1280,
+            height: 720,
+        },
+    );
+
+    let tex = blur(&mut rg, &tex);
+    let tex = into_ycbcr(&mut rg, tex);
+
+    (rg, tex)
 }
 
 fn try_main() -> std::result::Result<(), failure::Error> {
@@ -164,41 +248,6 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         .expect("window");
     let window = Arc::new(window);
 
-    let gradients_texture = renderer.allocate_handle(RenderResourceType::Texture);
-    let output_texture = renderer.allocate_handle(RenderResourceType::Texture);
-
-    device.create_texture(
-        gradients_texture,
-        &RenderTextureDesc {
-            texture_type: RenderTextureType::Tex2d,
-            bind_flags: RenderBindFlags::UNORDERED_ACCESS | RenderBindFlags::SHADER_RESOURCE,
-            format: RenderFormat::R32g32b32a32Float,
-            width,
-            height,
-            depth: 1,
-            levels: 1,
-            elements: 1,
-        },
-        None,
-        "Gradients texture".into(),
-    )?;
-
-    device.create_texture(
-        output_texture,
-        &RenderTextureDesc {
-            texture_type: RenderTextureType::Tex2d,
-            bind_flags: RenderBindFlags::UNORDERED_ACCESS,
-            format: RenderFormat::R32g32b32a32Float,
-            width,
-            height,
-            depth: 1,
-            levels: 1,
-            elements: 1,
-        },
-        None,
-        "Output texture".into(),
-    )?;
-
     let swapchain = {
         let swapchain = renderer.allocate_handle(RenderResourceType::SwapChain);
 
@@ -225,102 +274,20 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         swapchain
     };
 
-    let gradients_shader = renderer.allocate_handle(RenderResourceType::Shader);
-    device.create_shader(
-        gradients_shader,
-        &RenderShaderDesc {
-            shader_type: RenderShaderType::Compute,
-            shader_data: include_bytes!("../gradients.spv").as_ref().to_owned(),
-        },
-        "gradients compute shader".into(),
-    )?;
-
-    let gradients_pipeline = renderer.allocate_handle(RenderResourceType::ComputePipelineState);
-    device.create_compute_pipeline_state(
-        gradients_pipeline,
-        &RenderComputePipelineStateDesc {
-            shader: gradients_shader,
-            shader_signature: RenderShaderSignatureDesc::new(
-                &[RenderShaderParameter::new(0, 1)],
-                &[],
-            ),
-        },
-        "gradients compute pipeline".into(),
-    )?;
-
-    let blur_shader = renderer.allocate_handle(RenderResourceType::Shader);
-    device.create_shader(
-        blur_shader,
-        &RenderShaderDesc {
-            shader_type: RenderShaderType::Compute,
-            shader_data: include_bytes!("../blur.spv").as_ref().to_owned(),
-        },
-        "blur compute shader".into(),
-    )?;
-
-    let blur_pipeline = renderer.allocate_handle(RenderResourceType::ComputePipelineState);
-    device.create_compute_pipeline_state(
-        blur_pipeline,
-        &RenderComputePipelineStateDesc {
-            shader: blur_shader,
-            shader_signature: RenderShaderSignatureDesc::new(
-                &[RenderShaderParameter::new(1, 1)],
-                &[],
-            ),
-        },
-        "blur compute pipeline".into(),
-    )?;
-
+    let mut persistent_resources: Vec<RenderResourceHandle> = Default::default();
     let mut retired_frames: VecDeque<Option<FrameResources>> = Default::default();
     retired_frames.push_back(None);
     retired_frames.push_back(None);
 
+    let shader_cache: Arc<RwLock<_>> = Default::default();
+
     for _ in 0..5 {
         if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
-            device.wait_for_fence(frame_resources.submit_done_fence)?;
+            device.wait_for_fence(frame_resources.present_done_fence)?;
             frame_resources.destroy_now(&mut **device);
         }
-
         let mut frame_resources = FrameResources::default();
 
-        let gradients_shader_views =
-            renderer.allocate_frame_handle(RenderResourceType::ShaderViews, &mut frame_resources);
-        device.create_shader_views(
-            gradients_shader_views,
-            &RenderShaderViewsDesc {
-                shader_resource_views: Vec::new(),
-                unordered_access_views: vec![build::texture_2d_rw(
-                    gradients_texture,
-                    RenderFormat::R32g32b32a32Float,
-                    0,
-                    0,
-                )],
-            },
-            "gradients compute shader resource views".into(),
-        )?;
-
-        let blur_shader_views =
-            renderer.allocate_frame_handle(RenderResourceType::ShaderViews, &mut frame_resources);
-        device.create_shader_views(
-            blur_shader_views,
-            &RenderShaderViewsDesc {
-                shader_resource_views: vec![build::texture_2d(
-                    gradients_texture,
-                    RenderFormat::R32g32b32a32Float,
-                    0,
-                    1,
-                    0,
-                    0.0f32,
-                )],
-                unordered_access_views: vec![build::texture_2d_rw(
-                    output_texture,
-                    RenderFormat::R32g32b32a32Float,
-                    0,
-                    0,
-                )],
-            },
-            "blur compute shader resource views".into(),
-        )?;
         let main_command_list_handle =
             renderer.allocate_frame_handle(RenderResourceType::CommandList, &mut frame_resources);
         device.create_command_list(main_command_list_handle, "Main command list".into())?;
@@ -328,36 +295,29 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         let mut cb =
             RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
 
-        cb.dispatch_2d(
-            gradients_pipeline,
-            &[RenderShaderArgument {
-                constant_buffer: None,
-                shader_views: Some(gradients_shader_views),
-                constant_buffer_offset: 0,
-            }],
-            width,
-            height,
-            Some(8),
-            Some(8),
-        )?;
+        let output_texture = {
+            let (rg, tex) = render_frame_rg();
 
-        cb.transitions(&[(
-            gradients_texture,
-            RenderResourceStates::NON_PIXEL_SHADER_RESOURCE,
-        )])?;
+            println!("Recorded {} passes", rg.passes.len());
+            let mut rg_execution_output = rg.execute(
+                rg::RenderGraphExecutionParams {
+                    handles: rg::TrackingResourceHandleAllocator::new(renderer.handles.clone()),
+                    device: &**device,
+                    shader_cache: shader_cache.clone(),
+                },
+                &mut cb,
+                tex,
+            );
 
-        cb.dispatch_2d(
-            blur_pipeline,
-            &[RenderShaderArgument {
-                constant_buffer: None,
-                shader_views: Some(blur_shader_views),
-                constant_buffer_offset: 0,
-            }],
-            width,
-            height,
-            Some(8),
-            Some(8),
-        )?;
+            frame_resources
+                .handles
+                .append(&mut rg_execution_output.allocated_resources.transient);
+
+            persistent_resources.append(&mut rg_execution_output.allocated_resources.persistent);
+            rg_execution_output.output_texture
+        };
+
+        device.compile_command_list(main_command_list_handle, &cb)?;
 
         let submit_done_fence =
             renderer.allocate_frame_handle(RenderResourceType::Fence, &mut frame_resources);
@@ -369,17 +329,10 @@ fn try_main() -> std::result::Result<(), failure::Error> {
             "submit done fence".into(),
         )?;
 
-        device.compile_command_list(main_command_list_handle, &cb)?;
-        device.submit_command_list(
-            main_command_list_handle,
-            true,
-            None,
-            None,
-            Some(submit_done_fence),
-        )?;
-        frame_resources.submit_done_fence = submit_done_fence;
+        device.submit_command_list(main_command_list_handle, true, None, None, None)?;
+        frame_resources.present_done_fence = submit_done_fence;
 
-        device.present_swap_chain(swapchain, output_texture)?;
+        device.present_swap_chain(swapchain, output_texture, Some(submit_done_fence))?;
         device.advance_frame()?;
 
         retired_frames.push_back(Some(frame_resources));
@@ -397,12 +350,10 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         }
     }
 
-    device.destroy_resource(gradients_shader)?;
-    device.destroy_resource(gradients_pipeline)?;
-    device.destroy_resource(blur_shader)?;
-    device.destroy_resource(blur_pipeline)?;
-    device.destroy_resource(output_texture)?;
-    device.destroy_resource(gradients_texture)?;
+    for resource in persistent_resources.drain(..) {
+        device.destroy_resource(resource)?;
+    }
+
     device.destroy_resource(swapchain)?;
 
     Ok(())

@@ -1,6 +1,23 @@
 use crate::rg;
 use crate::rg_helper::*;
 
+pub fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
+    let mut rg = rg::RenderGraph::new();
+
+    let tex = synth_gradients(
+        &mut rg,
+        rg::TextureDesc {
+            width: 1280,
+            height: 720,
+        },
+    );
+
+    let tex = blur(&mut rg, &tex);
+    let tex = into_ycbcr(&mut rg, tex);
+
+    (rg, tex)
+}
+
 fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::TextureHandle {
     let mut pass = rg.begin_pass();
     let (output, output_ref) = pass.create(desc);
@@ -72,21 +89,4 @@ fn into_ycbcr(rg: &mut rg::RenderGraph, mut input: rg::TextureHandle) -> rg::Tex
     });
 
     input
-}
-
-pub fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
-    let mut rg = rg::RenderGraph::new();
-
-    let tex = synth_gradients(
-        &mut rg,
-        rg::TextureDesc {
-            width: 1280,
-            height: 720,
-        },
-    );
-
-    let tex = blur(&mut rg, &tex);
-    let tex = into_ycbcr(&mut rg, tex);
-
-    (rg, tex)
 }

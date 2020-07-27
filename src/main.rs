@@ -1,8 +1,8 @@
+mod render_passes;
 mod rg;
 
 #[macro_use]
 mod rg_helper;
-use rg_helper::RgRenderCommandListExtension;
 
 use render_core::backend::*;
 use render_core::device::*;
@@ -126,93 +126,6 @@ impl FrameResources {
     }
 }
 
-fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::TextureHandle {
-    let mut pass = rg.begin_pass();
-    let (output, output_ref) = pass.create(desc);
-
-    pass.render(move |cb, registry| {
-        cb.rg_dispatch_2d(
-            registry.shader("gradients.spv", RenderShaderType::Compute),
-            output_ref.dims(),
-            &[RenderShaderArgument {
-                shader_views: Some(rg::shader_resource_views(
-                    registry,
-                    &[],
-                    &[("output_tex", rg::uav::texture_2d(output_ref))],
-                )),
-                constant_buffer: None,
-                constant_buffer_offset: 0,
-            }],
-        )
-    });
-
-    output
-}
-
-fn blur(rg: &mut rg::RenderGraph, input: &rg::TextureHandle) -> rg::TextureHandle {
-    let mut pass = rg.begin_pass();
-    let input_ref = pass.read(input);
-    let (output, output_ref) = pass.create(input.desc);
-
-    pass.render(move |cb, registry| {
-        cb.rg_dispatch_2d(
-            registry.shader("blur.spv", RenderShaderType::Compute),
-            input_ref.dims(),
-            &[RenderShaderArgument {
-                shader_views: Some(rg::shader_resource_views(
-                    registry,
-                    &[("input_tex", rg::srv::texture_2d(input_ref))],
-                    &[("output_tex", rg::uav::texture_2d(output_ref))],
-                )),
-                constant_buffer: None,
-                constant_buffer_offset: 0,
-            }],
-        )
-    });
-
-    output
-}
-
-fn into_ycbcr(rg: &mut rg::RenderGraph, mut input: rg::TextureHandle) -> rg::TextureHandle {
-    let mut pass = rg.begin_pass();
-    let input_ref = pass.write(&mut input);
-
-    pass.render(move |cb, registry| {
-        cb.rg_dispatch_2d(
-            registry.shader("into_ycbcr.spv", RenderShaderType::Compute),
-            input_ref.dims(),
-            &[RenderShaderArgument {
-                shader_views: Some(rg::shader_resource_views(
-                    registry,
-                    &[],
-                    &[("input_tex", rg::uav::texture_2d(input_ref))],
-                )),
-                constant_buffer: None,
-                constant_buffer_offset: 0,
-            }],
-        )
-    });
-
-    input
-}
-
-fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
-    let mut rg = rg::RenderGraph::new();
-
-    let tex = synth_gradients(
-        &mut rg,
-        rg::TextureDesc {
-            width: 1280,
-            height: 720,
-        },
-    );
-
-    let tex = blur(&mut rg, &tex);
-    let tex = into_ycbcr(&mut rg, tex);
-
-    (rg, tex)
-}
-
 fn try_main() -> std::result::Result<(), failure::Error> {
     let mut renderer = Renderer::new();
 
@@ -296,7 +209,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
             RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
 
         let output_texture = {
-            let (rg, tex) = render_frame_rg();
+            let (rg, tex) = crate::render_passes::render_frame_rg();
 
             println!("Recorded {} passes", rg.passes.len());
             let mut rg_execution_output = rg.execute(

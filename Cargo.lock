@@ -1100,6 +1100,7 @@ dependencies = [
  "raw-window-handle",
  "render-core",
  "render-hal-vk",
+ "spirv-reflect",
  "winit",
 ]
 

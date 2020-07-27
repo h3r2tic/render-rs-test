@@ -134,6 +134,8 @@ struct ResourceCreateInfo {
 
 pub enum GpuResource {
     Image(RenderResourceHandle),
+
+    #[allow(dead_code)]
     Buffer(RenderResourceHandle),
 }
 
@@ -579,13 +581,6 @@ pub struct ResourceRegistry<'exec_params, 'device> {
     resources: Vec<GpuResource>,
 }
 
-pub struct ShaderPipelineInfo {
-    pub pipeline_handle: RenderResourceHandle,
-    pub queried_binding_ordinals: Vec<u32>,
-    pub srv_count: usize,
-    pub uav_count: usize,
-}
-
 impl<'exec_params, 'device> ResourceRegistry<'exec_params, 'device> {
     pub fn get<T, GpuResType>(
         &self,
@@ -600,40 +595,6 @@ impl<'exec_params, 'device> ResourceRegistry<'exec_params, 'device> {
         )
     }
 
-    pub fn compute_shader(
-        &self,
-        shader_path: impl AsRef<str>,
-        query_binding_names: &[&'static str],
-    ) -> ShaderPipelineInfo {
-        let shader = self
-            .execution_params
-            .shader_cache
-            .write()
-            .unwrap()
-            .get_or_load(
-                self.execution_params,
-                RenderShaderType::Compute,
-                shader_path.as_ref(),
-            );
-
-        let queried_binding_ordinals = query_binding_names
-            .iter()
-            .copied()
-            .map(|binding_name| {
-                let pos_in_srv = shader.srvs.iter().position(|item| item == binding_name);
-                let pos_in_uav = shader.uavs.iter().position(|item| item == binding_name);
-                pos_in_srv.unwrap_or_else(move || pos_in_uav.expect(binding_name)) as u32
-            })
-            .collect();
-
-        ShaderPipelineInfo {
-            pipeline_handle: shader.pipeline_handle,
-            queried_binding_ordinals,
-            srv_count: shader.srvs.len(),
-            uav_count: shader.uavs.len(),
-        }
-    }
-
     pub fn shader(
         &self,
         shader_path: impl AsRef<str>,
@@ -645,83 +606,6 @@ impl<'exec_params, 'device> ResourceRegistry<'exec_params, 'device> {
             .unwrap()
             .get_or_load(self.execution_params, shader_type, shader_path.as_ref())
     }
-}
-
-pub mod srv {
-    use super::*;
-
-    pub struct RgSrv {
-        pub rg_ref: TextureRef<GpuSrv>,
-    }
-
-    pub fn texture_2d(rg_ref: TextureRef<GpuSrv>) -> RgSrv {
-        RgSrv { rg_ref }
-    }
-}
-
-pub mod uav {
-    use super::*;
-
-    pub struct RgUav {
-        pub rg_ref: TextureRef<GpuUav>,
-    }
-
-    pub fn texture_2d(rg_ref: TextureRef<GpuUav>) -> RgUav {
-        RgUav { rg_ref }
-    }
-}
-
-pub fn shader_resource_views(
-    registry: &ResourceRegistry,
-    // TODO: use names
-    srvs: &[(&'static str, srv::RgSrv)],
-    uavs: &[(&'static str, uav::RgUav)],
-) -> RenderResourceHandle {
-    let resource_views = RenderShaderViewsDesc {
-        shader_resource_views: srvs
-            .into_iter()
-            .map(|(_, srv)| {
-                // TODO
-                build::texture_2d(
-                    registry.get(srv.rg_ref.internal_clone()).0,
-                    RenderFormat::R32g32b32a32Float,
-                    0,
-                    1,
-                    0,
-                    0.0f32,
-                )
-            })
-            .collect(),
-        unordered_access_views: uavs
-            .into_iter()
-            .map(|(_, uav)| {
-                // TODO
-                build::texture_2d_rw(
-                    registry.get(uav.rg_ref.internal_clone()).0,
-                    RenderFormat::R32g32b32a32Float,
-                    0,
-                    0,
-                )
-            })
-            .collect(),
-    };
-
-    let resource_views_handle = registry
-        .execution_params
-        .handles
-        .allocate_transient(RenderResourceType::ShaderViews);
-
-    registry
-        .execution_params
-        .device
-        .create_shader_views(
-            resource_views_handle,
-            &resource_views,
-            "shader resource views".into(),
-        )
-        .unwrap();
-
-    resource_views_handle
 }
 
 pub trait ReferenceResource<GpuResType>: Sized + Copy {
@@ -752,7 +636,7 @@ macro_rules! def_resource_handles {
         pub struct $ref_type<GpuResType>(ResourceRef<$desc_type, GpuResType>);
 
         impl<GpuResType> $ref_type<GpuResType> {
-            fn internal_clone(&self) -> Self {
+            pub(crate) fn internal_clone(&self) -> Self {
                 Self(self.0.internal_clone())
             }
         }

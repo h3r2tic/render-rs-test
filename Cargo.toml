@@ -15,3 +15,4 @@ env_logger = "0.7"
 log = "0.4"
 winit = "0.19"
 raw-window-handle = "0.3.3"
+spirv-reflect = { git = "https://github.com/h3r2tic/spirv-reflect-rs.git", rev = "47636b8" }

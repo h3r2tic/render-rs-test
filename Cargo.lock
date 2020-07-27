@@ -1758,12 +1758,11 @@ dependencies = [
 [[package]]
 name = "turbosloth"
 version = "0.1.0"
-source = "git+https://github.com/h3r2tic/turbosloth.git?rev=feea140#feea140524700831256cde9ad9cc9e4e45a83e37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f6ed6343b6e6044763aaa8ce96976edc88f5a51024bb67e8c2468140f7d3762"
 dependencies = [
  "anyhow",
  "async-trait",
- "chrono",
- "env_logger",
  "tokio",
  "tracing",
  "turbosloth-macros",
@@ -1773,7 +1772,8 @@ dependencies = [
 [[package]]
 name = "turbosloth-macros"
 version = "0.1.0"
-source = "git+https://github.com/h3r2tic/turbosloth.git?rev=feea140#feea140524700831256cde9ad9cc9e4e45a83e37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39a4eb437013db6680a62c5c2c27e2791cd639e84547c25795aa4f79c15d6599"
 dependencies = [
  "proc-macro2 1.0.19",
  "quote 1.0.7",

@@ -1,5 +1,7 @@
+mod file;
 mod render_passes;
 mod rg;
+mod shader_compiler;
 
 #[macro_use]
 mod rg_helper;
@@ -144,7 +146,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         let info_list = Arc::clone(&device_info);
         assert!(info_list.len() > 0);
 
-        println!("{:#?}", info_list);
+        // println!("{:#?}", info_list);
     }
 
     let mut device = renderer.device.write().unwrap();
@@ -193,6 +195,8 @@ fn try_main() -> std::result::Result<(), failure::Error> {
     retired_frames.push_back(None);
 
     let shader_cache: Arc<RwLock<_>> = Default::default();
+    let runtime = Arc::new(RwLock::new(tokio::runtime::Runtime::new().unwrap()));
+    let turbosloth_cache = turbosloth::Cache::create();
 
     for _ in 0..5 {
         if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
@@ -211,12 +215,14 @@ fn try_main() -> std::result::Result<(), failure::Error> {
         let output_texture = {
             let (rg, tex) = crate::render_passes::render_frame_rg();
 
-            println!("Recorded {} passes", rg.passes.len());
+            // println!("Recorded {} passes", rg.passes.len());
             let mut rg_execution_output = rg.execute(
                 rg::RenderGraphExecutionParams {
                     handles: rg::TrackingResourceHandleAllocator::new(renderer.handles.clone()),
                     device: &**device,
                     shader_cache: shader_cache.clone(),
+                    runtime: runtime.clone(),
+                    turbosloth_cache: turbosloth_cache.clone(),
                 },
                 &mut cb,
                 tex,

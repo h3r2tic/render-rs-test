@@ -10,6 +10,8 @@ use render_core::{
     types::*,
 };
 
+use turbosloth::IntoLazy;
+
 use std::{
     collections::HashMap,
     marker::PhantomData,
@@ -209,6 +211,8 @@ pub struct RenderGraphExecutionParams<'device> {
     pub handles: TrackingResourceHandleAllocator,
     pub device: &'device dyn RenderDevice,
     pub shader_cache: Arc<RwLock<ShaderCache>>,
+    pub runtime: Arc<RwLock<tokio::runtime::Runtime>>,
+    pub turbosloth_cache: Arc<turbosloth::Cache>,
 }
 
 #[derive(Default)]
@@ -257,14 +261,14 @@ impl RenderGraph {
     ) -> RenderGraphExecutionOutput {
         let resource_lifetimes = self.calculate_resource_lifetimes();
 
-        println!(
+        /* println!(
             "Resources: {:#?}",
             self.resources
                 .iter()
                 .map(|info| info.desc)
                 .zip(resource_lifetimes.iter())
                 .collect::<Vec<_>>()
-        );
+        ); */
 
         let handles = &params.handles;
         let device = params.device;
@@ -491,37 +495,22 @@ impl ShaderCache {
             .entry(key)
             .or_insert_with(|| {
                 let path = path.as_ref();
-                let shader_data = std::fs::read(path).unwrap();
 
-                let mut srvs = Vec::new();
-                let mut uavs = Vec::new();
-
-                match spirv_reflect::ShaderModule::load_u8_data(&shader_data) {
-                    Ok(reflect_module) => {
-                        let descriptor_sets =
-                            reflect_module.enumerate_descriptor_sets(None).unwrap();
-                        {
-                            let set = &descriptor_sets[0];
-                            for binding_index in 0..set.bindings.len() {
-                                let binding = &set.bindings[binding_index];
-                                assert_ne!(
-                                    binding.resource_type,
-                                    spirv_reflect::types::resource::ReflectResourceType::Undefined
-                                );
-                                match binding.resource_type {
-							spirv_reflect::types::resource::ReflectResourceType::ShaderResourceView => {
-                                srvs.push(binding.name.clone());
-							},
-							spirv_reflect::types::resource::ReflectResourceType::UnorderedAccessView => {
-								uavs.push(binding.name.clone());
-							},
-							_ => {},
-						}
-                            }
-                        }
-                    }
-                    Err(err) => panic!("failed to parse shader - {:?}", err),
+                let shader = crate::shader_compiler::CompileComputeShader {
+                    path: {
+                        let mut full_path = PathBuf::from("assets/shaders");
+                        full_path.push(path);
+                        full_path
+                    },
                 }
+                .into_lazy();
+
+                let shader_data = params
+                    .runtime
+                    .write()
+                    .unwrap()
+                    .block_on(shader.eval(&params.turbosloth_cache))
+                    .unwrap();
 
                 let shader_handle = params
                     .handles
@@ -532,7 +521,7 @@ impl ShaderCache {
                         shader_handle,
                         &RenderShaderDesc {
                             shader_type,
-                            shader_data,
+                            shader_data: shader_data.spirv.clone(),
                         },
                         "compute shader".into(),
                     )
@@ -550,8 +539,8 @@ impl ShaderCache {
                             shader: shader_handle,
                             shader_signature: RenderShaderSignatureDesc::new(
                                 &[RenderShaderParameter::new(
-                                    srvs.len() as u32,
-                                    uavs.len() as u32,
+                                    shader_data.srvs.len() as u32,
+                                    shader_data.uavs.len() as u32,
                                 )],
                                 &[],
                             ),
@@ -563,13 +552,11 @@ impl ShaderCache {
                 Arc::new(ShaderCacheEntry {
                     shader_handle,
                     pipeline_handle,
-                    srvs,
-                    uavs,
-
-                    // TODO
-                    group_size_x: 8,
-                    group_size_y: 8,
-                    group_size_z: 1,
+                    srvs: shader_data.srvs.clone(),
+                    uavs: shader_data.uavs.clone(),
+                    group_size_x: shader_data.group_size.0,
+                    group_size_y: shader_data.group_size.1,
+                    group_size_z: shader_data.group_size.2,
                 })
             })
             .clone()
@@ -589,7 +576,7 @@ impl<'exec_params, 'device> ResourceRegistry<'exec_params, 'device> {
     where
         GpuResType: ToGpuResourceView,
     {
-        println!("ResourceRegistry::get: {:?}", resource.handle);
+        // println!("ResourceRegistry::get: {:?}", resource.handle);
         <GpuResType as ToGpuResourceView>::to_gpu_resource_view(
             &self.resources[resource.handle.id as usize],
         )

@@ -10,7 +10,7 @@ use render_core::{
     types::*,
 };
 
-use turbosloth::IntoLazy;
+use turbosloth::{IntoLazy, Lazy};
 
 use std::{
     collections::HashMap,
@@ -464,6 +464,7 @@ struct ShaderCacheKey {
 
 // TODO: figure out the ownership model -- should this release the resources?
 pub struct ShaderCacheEntry {
+    lazy_handle: Lazy<crate::shader_compiler::ComputeShader>,
     #[allow(dead_code)]
     shader_handle: RenderResourceHandle,
     pub pipeline_handle: RenderResourceHandle,
@@ -491,12 +492,19 @@ impl ShaderCache {
             shader_type,
         };
 
+        // If the shader's lazy handle is stale, force re-compilation
+        if let Some(entry) = self.shaders.get(&key) {
+            if !entry.lazy_handle.is_up_to_date() {
+                self.shaders.remove(&key);
+            }
+        }
+
         self.shaders
             .entry(key)
             .or_insert_with(|| {
                 let path = path.as_ref();
 
-                let shader = crate::shader_compiler::CompileComputeShader {
+                let lazy_shader = crate::shader_compiler::CompileComputeShader {
                     path: {
                         let mut full_path = PathBuf::from("assets/shaders");
                         full_path.push(path);
@@ -509,7 +517,7 @@ impl ShaderCache {
                     .runtime
                     .write()
                     .unwrap()
-                    .block_on(shader.eval(&params.turbosloth_cache))
+                    .block_on(lazy_shader.eval(&params.turbosloth_cache))
                     .unwrap();
 
                 let shader_handle = params
@@ -550,6 +558,7 @@ impl ShaderCache {
                     .unwrap();
 
                 Arc::new(ShaderCacheEntry {
+                    lazy_handle: lazy_shader,
                     shader_handle,
                     pipeline_handle,
                     srvs: shader_data.srvs.clone(),

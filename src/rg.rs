@@ -505,11 +505,7 @@ impl ShaderCache {
                 let path = path.as_ref();
 
                 let lazy_shader = crate::shader_compiler::CompileComputeShader {
-                    path: {
-                        let mut full_path = PathBuf::from("assets/shaders");
-                        full_path.push(path);
-                        full_path
-                    },
+                    path: path.to_owned(),
                 }
                 .into_lazy();
 

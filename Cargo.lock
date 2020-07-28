@@ -1725,47 +1725,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing"
-version = "0.1.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbdf4ccd1652592b01286a5dbe1e2a77d78afaa34beadd9872a5f7396f92aaa9"
-dependencies = [
- "cfg-if",
- "tracing-attributes",
- "tracing-core",
-]
-
-[[package]]
-name = "tracing-attributes"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0693bf8d6f2bf22c690fc61a9d21ac69efdbb894a17ed596b9af0f01e64b84b"
-dependencies = [
- "proc-macro2 1.0.19",
- "quote 1.0.7",
- "syn 1.0.35",
-]
-
-[[package]]
-name = "tracing-core"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94ae75f0d28ae10786f3b1895c55fe72e79928fd5ccdebb5438c75e93fec178f"
-dependencies = [
- "lazy_static",
-]
-
-[[package]]
 name = "turbosloth"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f6ed6343b6e6044763aaa8ce96976edc88f5a51024bb67e8c2468140f7d3762"
+checksum = "c4f652eb1d5402943397ebfb9312770df30a665f993c1c47d584a77194dc784c"
 dependencies = [
- "anyhow",
  "async-trait",
- "tokio",
- "tracing",
- "turbosloth-macros",
  "twox-hash",
 ]
 

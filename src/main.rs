@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+use turbosloth::*;
 
 pub fn get_render_debug_flags() -> RenderDebugFlags {
     RenderDebugFlags::CPU_VALIDATION
@@ -196,7 +197,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
 
     let shader_cache: Arc<RwLock<_>> = Default::default();
     let runtime = Arc::new(RwLock::new(tokio::runtime::Runtime::new().unwrap()));
-    let turbosloth_cache = turbosloth::Cache::create();
+    let lazy_cache = LazyCache::create();
 
     for _ in 0..5 {
         if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
@@ -222,7 +223,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
                     device: &**device,
                     shader_cache: shader_cache.clone(),
                     runtime: runtime.clone(),
-                    turbosloth_cache: turbosloth_cache.clone(),
+                    lazy_cache: lazy_cache.clone(),
                 },
                 &mut cb,
                 tex,

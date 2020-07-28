@@ -10,7 +10,7 @@ use render_core::{
     types::*,
 };
 
-use turbosloth::{IntoLazy, Lazy};
+use turbosloth::*;
 
 use std::{
     collections::HashMap,
@@ -212,7 +212,7 @@ pub struct RenderGraphExecutionParams<'device> {
     pub device: &'device dyn RenderDevice,
     pub shader_cache: Arc<RwLock<ShaderCache>>,
     pub runtime: Arc<RwLock<tokio::runtime::Runtime>>,
-    pub turbosloth_cache: Arc<turbosloth::Cache>,
+    pub lazy_cache: Arc<LazyCache>,
 }
 
 #[derive(Default)]
@@ -517,7 +517,7 @@ impl ShaderCache {
                     .runtime
                     .write()
                     .unwrap()
-                    .block_on(lazy_shader.eval(&params.turbosloth_cache))
+                    .block_on(lazy_shader.eval(&params.lazy_cache))
                     .unwrap();
 
                 let shader_handle = params

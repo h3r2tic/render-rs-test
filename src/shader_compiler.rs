@@ -10,16 +10,16 @@ use std::{
 };
 use turbosloth::*;
 
-#[derive(Clone, Hash, IntoLazy)]
+#[derive(Clone, Hash)]
 pub struct CompileComputeShader {
     pub path: PathBuf,
 }
 
 #[async_trait]
 impl LazyWorker for CompileComputeShader {
-    type Output = ComputeShader;
+    type Output = Result<ComputeShader>;
 
-    async fn run(self, ctx: RunContext) -> Result<Self::Output> {
+    async fn run(self, ctx: RunContext) -> Self::Output {
         let file_path = self.path.to_str().unwrap().to_owned();
         let source = tokio::task::spawn_blocking(move || {
             shader_prepper::process_file(
@@ -29,7 +29,7 @@ impl LazyWorker for CompileComputeShader {
             )
         });
 
-        let source = source.await?.map_err(|err| anyhow!("{}", err))?;
+        let source = source.await?.map_err(|err| anyhow::anyhow!("{}", err))?;
 
         let ext = self
             .path
@@ -73,7 +73,7 @@ fn compile_cs_hlsl_impl(
         let t0 = std::time::Instant::now();
         let spirv =
             hassle_rs::compile_hlsl(&name, &source_text, "main", "cs_6_4", &["-spirv"], &[])
-                .map_err(|err| anyhow!("{}", err))?;
+                .map_err(|err| anyhow::anyhow!("{}", err))?;
         println!("dxc took {:?}", t0.elapsed());
 
         use byte_slice_cast::*;

@@ -8,16 +8,16 @@ lazy_static! {
     static ref FILE_WATCHER: Mutex<Hotwatch> = Mutex::new(Hotwatch::new().unwrap());
 }
 
-#[derive(Clone, Hash, IntoLazy)]
+#[derive(Clone, Hash)]
 pub struct LoadFile {
     pub path: PathBuf,
 }
 
 #[async_trait]
 impl LazyWorker for LoadFile {
-    type Output = Vec<u8>;
+    type Output = anyhow::Result<Vec<u8>>;
 
-    async fn run(self, ctx: RunContext) -> Result<Self::Output> {
+    async fn run(self, ctx: RunContext) -> Self::Output {
         let invalidation_trigger = ctx.get_invalidation_trigger();
 
         FILE_WATCHER

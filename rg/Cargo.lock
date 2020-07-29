@@ -850,15 +850,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "meowhash"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6675821ab6d682e62b20b2626369b9a5e445ad5819a4efa361eb692401b9b3e1"
-dependencies = [
- "digest",
-]
-
-[[package]]
 name = "metal"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1268,7 +1259,6 @@ dependencies = [
  "chrono",
  "downcast-rs",
  "enum_primitive",
- "failure",
  "fern",
  "glob",
  "libloading 0.5.2",
@@ -1279,6 +1269,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
+ "thiserror",
  "winit",
 ]
 
@@ -1301,11 +1292,9 @@ dependencies = [
  "digest",
  "downcast-rs",
  "enum_primitive",
- "failure",
  "fern",
  "foreign-types 0.5.0",
  "log",
- "meowhash",
  "metal",
  "metal-rs",
  "num-traits 0.2.12",
@@ -1316,6 +1305,7 @@ dependencies = [
  "renderdoc",
  "smallvec 1.4.1",
  "spirv-reflect",
+ "thiserror",
  "twox-hash",
  "vk-mem",
  "vk-sync",
@@ -1354,7 +1344,6 @@ dependencies = [
  "byte-slice-cast",
  "chrono",
  "env_logger",
- "failure",
  "hassle-rs",
  "hotwatch",
  "lazy_static",

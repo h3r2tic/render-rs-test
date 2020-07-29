@@ -9,7 +9,7 @@ pub trait RgRenderCommandListExtension {
         shader: &ShaderCacheEntry,
         thread_count: [u32; 2],
         shader_arguments: &[RenderShaderArgument],
-    ) -> std::result::Result<(), failure::Error>;
+    ) -> std::result::Result<(), Box<dyn std::error::Error>>;
 }
 
 impl RgRenderCommandListExtension for RenderCommandList<'_> {
@@ -18,7 +18,7 @@ impl RgRenderCommandListExtension for RenderCommandList<'_> {
         shader: &ShaderCacheEntry,
         thread_count: [u32; 2],
         shader_arguments: &[RenderShaderArgument],
-    ) -> Result<(), failure::Error> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         self.dispatch_2d(
             shader.pipeline_handle,
             shader_arguments,

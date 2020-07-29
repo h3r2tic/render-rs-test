@@ -1,6 +1,8 @@
 #![allow(unused_imports)]
 
-use crate::{resource::*, shader_cache::*};
+use crate::{
+    context::RenderGraphContext, resource::*, resource_registry::ResourceRegistry, shader_cache::*,
+};
 
 use render_core::{
     backend::*,
@@ -18,20 +20,19 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
 };
-type Result<T> = std::result::Result<T, failure::Error>;
 
 #[derive(Clone, Copy, Debug)]
-enum GenericResourceDesc {
+pub(crate) enum GenericResourceDesc {
     Texture(TextureDesc),
 }
 
-struct GraphResourceCreateInfo {
-    desc: GenericResourceDesc,
-    create_pass_idx: usize,
+pub(crate) struct GraphResourceCreateInfo {
+    pub desc: GenericResourceDesc,
+    pub create_pass_idx: usize,
 }
 
 pub struct RenderGraph {
-    pub passes: Vec<RecordedPass>,
+    passes: Vec<RecordedPass>,
     resources: Vec<GraphResourceCreateInfo>,
 }
 
@@ -43,7 +44,10 @@ impl RenderGraph {
         }
     }
 
-    fn create_raw_resource(&mut self, info: GraphResourceCreateInfo) -> GraphRawResourceHandle {
+    pub(crate) fn create_raw_resource(
+        &mut self,
+        info: GraphResourceCreateInfo,
+    ) -> GraphRawResourceHandle {
         let res = GraphRawResourceHandle {
             id: self.resources.len() as u32,
             version: 0,
@@ -215,136 +219,20 @@ impl RenderGraph {
         }
     }
 
-    fn record_pass(&mut self, pass: RecordedPass) {
+    pub(crate) fn record_pass(&mut self, pass: RecordedPass) {
         self.passes.push(pass);
     }
 }
 
-type DynRenderFn = dyn FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> Result<()>;
+type DynRenderFn = dyn FnOnce(
+    &mut RenderCommandList<'_>,
+    &ResourceRegistry,
+) -> std::result::Result<(), Box<dyn std::error::Error>>;
 
 #[derive(Default)]
-pub struct RecordedPass {
-    read: Vec<GraphRawResourceHandle>,
-    write: Vec<GraphRawResourceHandle>,
-    create: Vec<GraphRawResourceHandle>,
-    render_fn: Option<Box<DynRenderFn>>,
-}
-
-pub struct RenderGraphContext<'rg> {
-    rg: &'rg mut RenderGraph,
-    pass_idx: usize,
-    pass: Option<RecordedPass>,
-}
-
-impl<'s> Drop for RenderGraphContext<'s> {
-    fn drop(&mut self) {
-        self.rg.record_pass(self.pass.take().unwrap())
-    }
-}
-
-impl<'rg> RenderGraphContext<'rg> {
-    pub fn create(&mut self, desc: TextureDesc) -> (TextureHandle, TextureRef<GpuUav>) {
-        let handle: TextureHandle = TextureHandle(ResourceHandle {
-            raw: self.rg.create_raw_resource(GraphResourceCreateInfo {
-                desc: GenericResourceDesc::Texture(desc),
-                create_pass_idx: self.pass_idx,
-            }),
-            desc,
-        });
-
-        self.pass.as_mut().unwrap().create.push(handle.0.raw);
-
-        let reference = RawResourceRef {
-            desc,
-            handle: handle.0.raw,
-            marker: PhantomData,
-        };
-
-        (handle, TextureRef(reference))
-    }
-
-    pub fn read<DescType>(
-        &mut self,
-        handle: &impl std::ops::Deref<Target = ResourceHandle<DescType>>,
-    ) -> <DescType as CreateReference<GpuSrv>>::RefType
-    where
-        DescType: CreateReference<GpuSrv>,
-        DescType: ResourceDescTraits,
-    {
-        self.pass.as_mut().unwrap().read.push(handle.raw);
-
-        let reference = RawResourceRef {
-            desc: handle.desc.clone(),
-            handle: handle.raw,
-            marker: PhantomData,
-        };
-
-        <DescType as CreateReference<GpuSrv>>::create(reference)
-    }
-
-    pub fn write<DescType>(
-        &mut self,
-        handle: &mut impl std::ops::DerefMut<Target = ResourceHandle<DescType>>,
-    ) -> <DescType as CreateReference<GpuUav>>::RefType
-    where
-        DescType: CreateReference<GpuUav>,
-        DescType: ResourceDescTraits,
-    {
-        self.pass.as_mut().unwrap().write.push(handle.raw);
-
-        let reference = RawResourceRef {
-            desc: handle.desc.clone(),
-            handle: handle.raw.next_version(),
-            marker: PhantomData,
-        };
-
-        <DescType as CreateReference<GpuUav>>::create(reference)
-    }
-
-    pub fn render(
-        &mut self,
-        render: impl FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> Result<()> + 'static,
-    ) {
-        let prev = self
-            .pass
-            .as_mut()
-            .unwrap()
-            .render_fn
-            .replace(Box::new(render));
-
-        assert!(prev.is_none());
-    }
-}
-
-// Descriptor binding
-pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache> {
-    pub execution_params: &'exec_params RenderGraphExecutionParams<'device, 'shader_cache>,
-    resources: Vec<GpuResource>,
-}
-
-impl<'exec_params, 'device, 'shader_cache> ResourceRegistry<'exec_params, 'device, 'shader_cache> {
-    pub fn get<T, GpuResType>(
-        &self,
-        resource: impl std::ops::Deref<Target = RawResourceRef<T, GpuResType>>,
-    ) -> GpuResType
-    where
-        GpuResType: ToGpuResourceView,
-    {
-        // println!("ResourceRegistry::get: {:?}", resource.handle);
-        <GpuResType as ToGpuResourceView>::to_gpu_resource_view(
-            &self.resources[resource.handle.id as usize],
-        )
-    }
-
-    pub fn shader(
-        &self,
-        shader_path: impl AsRef<Path>,
-        shader_type: RenderShaderType,
-    ) -> Arc<ShaderCacheEntry> {
-        self.execution_params.shader_cache.get_or_load(
-            self.execution_params,
-            shader_type,
-            shader_path.as_ref(),
-        )
-    }
+pub(crate) struct RecordedPass {
+    pub read: Vec<GraphRawResourceHandle>,
+    pub write: Vec<GraphRawResourceHandle>,
+    pub create: Vec<GraphRawResourceHandle>,
+    pub render_fn: Option<Box<DynRenderFn>>,
 }

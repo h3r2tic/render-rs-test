@@ -10,13 +10,13 @@ edition = "2018"
 render-core = { path = "../../ext/render-rs/render-core" }
 render-hal-vk = { path = "../../ext/render-rs/render-hal-vk" }
 rg = { path = "rg" }
-failure = "0.1.5"
 chrono = "0.4"
 env_logger = "0.7"
 log = "0.4"
 winit = "0.19"
 raw-window-handle = "0.3.3"
 spirv-reflect = { git = "https://github.com/h3r2tic/spirv-reflect-rs.git", rev = "47636b8" }
+failure = "0.1.8"   # for shader-prepper: TODO: NUKE
 
 hassle-rs = "0.4.0"
 turbosloth = "0.2.0"

@@ -3,6 +3,7 @@ use render_core::{handles::*, types::*};
 use std::{path::Path, sync::Arc};
 
 // TODO: figure out the ownership model -- should this release the resources?
+// TODO: non-compute
 pub struct ShaderCacheEntry {
     pub shader_handle: RenderResourceHandle,
     pub pipeline_handle: RenderResourceHandle,

@@ -239,7 +239,7 @@ impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
     }
 }
 
-fn try_main() -> std::result::Result<(), failure::Error> {
+fn try_main() -> std::result::Result<(), anyhow::Error> {
     let mut renderer = Renderer::new();
 
     let render_system = &mut renderer.render_system;

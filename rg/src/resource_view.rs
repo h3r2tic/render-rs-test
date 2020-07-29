@@ -1,4 +1,4 @@
-use crate::{graph::*, shader_cache::ShaderCacheEntry};
+use crate::{resource_registry::ResourceRegistry, shader_cache::ShaderCacheEntry};
 use render_core::{handles::*, state::build, types::*};
 use std::sync::Arc;
 

@@ -1,19 +1,17 @@
 mod file;
 mod render_passes;
-mod rg;
 mod shader_compiler;
 
-#[macro_use]
-mod rg_helper;
-
-use render_core::backend::*;
-use render_core::device::*;
-use render_core::handles::*;
-use render_core::{encoder::RenderCommandList, system::*, types::*};
-use std::collections::VecDeque;
-use std::env;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use render_core::{
+    backend::*, device::*, encoder::RenderCommandList, handles::*,
+    state::RenderComputePipelineStateDesc, system::*, types::*,
+};
+use std::{
+    collections::{HashMap, VecDeque},
+    env,
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+};
 use turbosloth::*;
 
 pub fn get_render_debug_flags() -> RenderDebugFlags {
@@ -129,6 +127,116 @@ impl FrameResources {
     }
 }
 
+#[derive(Hash, PartialEq, Eq)]
+struct ShaderCacheKey {
+    path: PathBuf,
+    shader_type: RenderShaderType,
+}
+
+struct TurboslothShaderCacheEntry {
+    lazy_handle: Lazy<crate::shader_compiler::ComputeShader>,
+    entry: Arc<rg::shader_cache::ShaderCacheEntry>,
+}
+
+struct TurboslothShaderCache {
+    shaders: HashMap<ShaderCacheKey, TurboslothShaderCacheEntry>,
+    lazy_cache: Arc<LazyCache>,
+}
+
+impl TurboslothShaderCache {
+    fn new(lazy_cache: Arc<LazyCache>) -> Self {
+        Self {
+            shaders: Default::default(),
+            lazy_cache,
+        }
+    }
+}
+
+impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
+    fn get_or_load(
+        &mut self,
+        params: &rg::RenderGraphExecutionParams<'_>,
+        shader_type: RenderShaderType,
+        path: &Path,
+    ) -> Arc<rg::shader_cache::ShaderCacheEntry> {
+        let key = ShaderCacheKey {
+            path: path.to_owned(),
+            shader_type,
+        };
+
+        // If the shader's lazy handle is stale, force re-compilation
+        if let Some(entry) = self.shaders.get(&key) {
+            if !entry.lazy_handle.is_up_to_date() {
+                self.shaders.remove(&key);
+            }
+        }
+
+        let lazy_cache = &self.lazy_cache;
+        self.shaders
+            .entry(key)
+            .or_insert_with(|| {
+                let path = path;
+
+                let lazy_shader = crate::shader_compiler::CompileComputeShader {
+                    path: path.to_owned(),
+                }
+                .into_lazy();
+
+                let shader_data = smol::block_on(lazy_shader.eval(lazy_cache)).unwrap();
+
+                let shader_handle = params
+                    .handles
+                    .allocate_persistent(RenderResourceType::Shader);
+                params
+                    .device
+                    .create_shader(
+                        shader_handle,
+                        &RenderShaderDesc {
+                            shader_type,
+                            shader_data: shader_data.spirv.clone(),
+                        },
+                        "compute shader".into(),
+                    )
+                    .unwrap();
+
+                let pipeline_handle = params
+                    .handles
+                    .allocate_persistent(RenderResourceType::ComputePipelineState);
+
+                params
+                    .device
+                    .create_compute_pipeline_state(
+                        pipeline_handle,
+                        &RenderComputePipelineStateDesc {
+                            shader: shader_handle,
+                            shader_signature: RenderShaderSignatureDesc::new(
+                                &[RenderShaderParameter::new(
+                                    shader_data.srvs.len() as u32,
+                                    shader_data.uavs.len() as u32,
+                                )],
+                                &[],
+                            ),
+                        },
+                        "gradients compute pipeline".into(),
+                    )
+                    .unwrap();
+
+                TurboslothShaderCacheEntry {
+                    lazy_handle: lazy_shader,
+                    entry: Arc::new(rg::shader_cache::ShaderCacheEntry {
+                        shader_handle,
+                        pipeline_handle,
+                        srvs: shader_data.srvs.clone(),
+                        uavs: shader_data.uavs.clone(),
+                        group_size: shader_data.group_size,
+                    }),
+                }
+            })
+            .entry
+            .clone()
+    }
+}
+
 fn try_main() -> std::result::Result<(), failure::Error> {
     let mut renderer = Renderer::new();
 
@@ -195,9 +303,9 @@ fn try_main() -> std::result::Result<(), failure::Error> {
     retired_frames.push_back(None);
     retired_frames.push_back(None);
 
-    let shader_cache: Arc<RwLock<_>> = Default::default();
-    let runtime = Arc::new(RwLock::new(tokio::runtime::Runtime::new().unwrap()));
-    let lazy_cache = LazyCache::create();
+    let shader_cache: Arc<RwLock<Box<dyn rg::shader_cache::ShaderCache>>> = Arc::new(RwLock::new(
+        Box::new(TurboslothShaderCache::new(LazyCache::create())),
+    ));
 
     for _ in 0..5 {
         if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
@@ -222,8 +330,6 @@ fn try_main() -> std::result::Result<(), failure::Error> {
                     handles: rg::TrackingResourceHandleAllocator::new(renderer.handles.clone()),
                     device: &**device,
                     shader_cache: shader_cache.clone(),
-                    runtime: runtime.clone(),
-                    lazy_cache: lazy_cache.clone(),
                 },
                 &mut cb,
                 tex,

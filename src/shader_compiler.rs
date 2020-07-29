@@ -21,15 +21,12 @@ impl LazyWorker for CompileComputeShader {
 
     async fn run(self, ctx: RunContext) -> Self::Output {
         let file_path = self.path.to_str().unwrap().to_owned();
-        let source = tokio::task::spawn_blocking(move || {
-            shader_prepper::process_file(
-                &file_path,
-                &mut ShaderIncludeProvider { ctx: ctx.clone() },
-                String::new(),
-            )
-        });
-
-        let source = source.await?.map_err(|err| anyhow::anyhow!("{}", err))?;
+        let source = shader_prepper::process_file(
+            &file_path,
+            &mut ShaderIncludeProvider { ctx: ctx.clone() },
+            String::new(),
+        );
+        let source = source.map_err(|err| anyhow::anyhow!("{}", err))?;
 
         let ext = self
             .path
@@ -53,7 +50,7 @@ impl LazyWorker for CompileComputeShader {
 
 pub struct ComputeShader {
     pub name: String,
-    pub group_size: (u32, u32, u32),
+    pub group_size: [u32; 3],
     pub spirv: Vec<u8>,
     pub srvs: Vec<String>,
     pub uavs: Vec<String>,
@@ -136,16 +133,14 @@ impl<'a> shader_prepper::IncludeProvider for ShaderIncludeProvider {
             folder.join(path).as_str().to_string()
         };
 
-        let current_runtime = tokio::runtime::Handle::current();
-        let blob = current_runtime
-            .block_on(
-                crate::file::LoadFile {
-                    path: PathBuf::from(&path),
-                }
-                .into_lazy()
-                .eval(&self.ctx),
-            )
-            .map_err(|err| failure::format_err!("{}", err))?;
+        let blob = smol::block_on(
+            crate::file::LoadFile {
+                path: PathBuf::from(&path),
+            }
+            .into_lazy()
+            .eval(&self.ctx),
+        )
+        .map_err(|err| failure::format_err!("{}", err))?;
 
         String::from_utf8((*blob).clone())
             .map_err(|e| failure::format_err!("{}", e))
@@ -160,7 +155,7 @@ fn reflect_spirv_shader(shader_code: &[u32]) -> Result<spirv_reflect::ShaderModu
     res
 }
 
-fn get_cs_local_size_from_spirv(spirv: &[u32]) -> Result<(u32, u32, u32)> {
+fn get_cs_local_size_from_spirv(spirv: &[u32]) -> Result<[u32; 3]> {
     let mut loader = rspirv::dr::Loader::new();
     rspirv::binary::parse_words(spirv, &mut loader).unwrap();
     let module = loader.module();
@@ -172,7 +167,7 @@ fn get_cs_local_size_from_spirv(spirv: &[u32]) -> Result<(u32, u32, u32)> {
             use rspirv::dr::Operand::LiteralInt32;
 
             if let &[LiteralInt32(x), LiteralInt32(y), LiteralInt32(z)] = local_size {
-                return Ok((x, y, z));
+                return Ok([x, y, z]);
             } else {
                 bail!("Could not parse the ExecutionMode SPIR-V op");
             }

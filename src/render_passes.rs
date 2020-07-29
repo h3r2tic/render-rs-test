@@ -1,5 +1,4 @@
-use crate::rg;
-use crate::rg_helper::*;
+use rg::{command_ext::*, resource_view::*};
 
 pub fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
     let mut rg = rg::RenderGraph::new();

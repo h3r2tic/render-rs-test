@@ -139,7 +139,7 @@ struct TurboslothShaderCacheEntry {
 }
 
 struct TurboslothShaderCache {
-    shaders: HashMap<ShaderCacheKey, TurboslothShaderCacheEntry>,
+    shaders: RwLock<HashMap<ShaderCacheKey, TurboslothShaderCacheEntry>>,
     lazy_cache: Arc<LazyCache>,
 }
 
@@ -154,8 +154,8 @@ impl TurboslothShaderCache {
 
 impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
     fn get_or_load(
-        &mut self,
-        params: &rg::RenderGraphExecutionParams<'_>,
+        &self,
+        params: &rg::RenderGraphExecutionParams<'_, '_>,
         shader_type: RenderShaderType,
         path: &Path,
     ) -> Arc<rg::shader_cache::ShaderCacheEntry> {
@@ -164,15 +164,17 @@ impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
             shader_type,
         };
 
+        let mut shaders = self.shaders.write().unwrap();
+
         // If the shader's lazy handle is stale, force re-compilation
-        if let Some(entry) = self.shaders.get(&key) {
+        if let Some(entry) = shaders.get(&key) {
             if !entry.lazy_handle.is_up_to_date() {
-                self.shaders.remove(&key);
+                shaders.remove(&key);
             }
         }
 
         let lazy_cache = &self.lazy_cache;
-        self.shaders
+        shaders
             .entry(key)
             .or_insert_with(|| {
                 let path = path;
@@ -303,9 +305,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
     retired_frames.push_back(None);
     retired_frames.push_back(None);
 
-    let shader_cache: Arc<RwLock<Box<dyn rg::shader_cache::ShaderCache>>> = Arc::new(RwLock::new(
-        Box::new(TurboslothShaderCache::new(LazyCache::create())),
-    ));
+    let shader_cache = TurboslothShaderCache::new(LazyCache::create());
 
     for _ in 0..5 {
         if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
@@ -329,7 +329,7 @@ fn try_main() -> std::result::Result<(), failure::Error> {
                 rg::RenderGraphExecutionParams {
                     handles: rg::TrackingResourceHandleAllocator::new(renderer.handles.clone()),
                     device: &**device,
-                    shader_cache: shader_cache.clone(),
+                    shader_cache: &shader_cache,
                 },
                 &mut cb,
                 tex,

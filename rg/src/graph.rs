@@ -20,11 +20,6 @@ use std::{
 };
 type Result<T> = std::result::Result<T, failure::Error>;
 
-#[derive(Debug)]
-pub struct PipelineDesc {
-    pub shader: String,
-}
-
 #[derive(Clone, Copy, Debug)]
 enum GenericResourceDesc {
     Texture(TextureDesc),
@@ -101,10 +96,10 @@ struct ResourceLifetime {
     last_access: usize,
 }
 
-pub struct RenderGraphExecutionParams<'device> {
+pub struct RenderGraphExecutionParams<'device, 'shader_cache> {
     pub handles: TrackingResourceHandleAllocator,
     pub device: &'device dyn RenderDevice,
-    pub shader_cache: Arc<RwLock<Box<dyn ShaderCache>>>,
+    pub shader_cache: &'shader_cache dyn ShaderCache,
 }
 
 #[derive(Default)]
@@ -144,9 +139,9 @@ impl RenderGraph {
         resource_lifetimes
     }
 
-    pub fn execute<'device, 'cb, 'commands>(
+    pub fn execute<'device, 'shader_cache, 'cb, 'commands>(
         self,
-        params: RenderGraphExecutionParams<'device>,
+        params: RenderGraphExecutionParams<'device, 'shader_cache>,
         cb: &'cb mut RenderCommandList<'commands>,
         // TODO: use exported/imported resources instead
         get_output_texture: TextureHandle,
@@ -322,12 +317,12 @@ impl<'rg> RenderGraphContext<'rg> {
 }
 
 // Descriptor binding
-pub struct ResourceRegistry<'exec_params, 'device> {
-    pub execution_params: &'exec_params RenderGraphExecutionParams<'device>,
+pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache> {
+    pub execution_params: &'exec_params RenderGraphExecutionParams<'device, 'shader_cache>,
     resources: Vec<GpuResource>,
 }
 
-impl<'exec_params, 'device> ResourceRegistry<'exec_params, 'device> {
+impl<'exec_params, 'device, 'shader_cache> ResourceRegistry<'exec_params, 'device, 'shader_cache> {
     pub fn get<T, GpuResType>(
         &self,
         resource: impl std::ops::Deref<Target = RawResourceRef<T, GpuResType>>,
@@ -346,10 +341,10 @@ impl<'exec_params, 'device> ResourceRegistry<'exec_params, 'device> {
         shader_path: impl AsRef<Path>,
         shader_type: RenderShaderType,
     ) -> Arc<ShaderCacheEntry> {
-        self.execution_params
-            .shader_cache
-            .write()
-            .unwrap()
-            .get_or_load(self.execution_params, shader_type, shader_path.as_ref())
+        self.execution_params.shader_cache.get_or_load(
+            self.execution_params,
+            shader_type,
+            shader_path.as_ref(),
+        )
     }
 }

@@ -80,10 +80,7 @@ impl<'rg> RenderGraphContext<'rg> {
 
     pub fn render(
         &mut self,
-        render: impl FnOnce(
-                &mut RenderCommandList<'_>,
-                &ResourceRegistry,
-            ) -> std::result::Result<(), Box<dyn std::error::Error>>
+        render: impl FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> anyhow::Result<()>
             + 'static,
     ) {
         let prev = self

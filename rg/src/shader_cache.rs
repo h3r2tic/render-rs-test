@@ -15,8 +15,8 @@ pub struct ShaderCacheEntry {
 pub trait ShaderCache {
     fn get_or_load(
         &self,
-        params: &RenderGraphExecutionParams<'_, '_>,
+        params: &RenderGraphExecutionParams<'_, '_, '_>,
         shader_type: RenderShaderType,
         path: &Path,
-    ) -> Arc<ShaderCacheEntry>;
+    ) -> anyhow::Result<Arc<ShaderCacheEntry>>;
 }

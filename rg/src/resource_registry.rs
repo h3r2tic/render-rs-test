@@ -3,12 +3,15 @@ use crate::{graph::RenderGraphExecutionParams, resource::*, shader_cache::*};
 use render_core::types::*;
 use std::{path::Path, sync::Arc};
 
-pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache> {
-    pub execution_params: &'exec_params RenderGraphExecutionParams<'device, 'shader_cache>,
+pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc> {
+    pub execution_params:
+        &'exec_params RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc>,
     pub(crate) resources: Vec<GpuResource>,
 }
 
-impl<'exec_params, 'device, 'shader_cache> ResourceRegistry<'exec_params, 'device, 'shader_cache> {
+impl<'exec_params, 'device, 'shader_cache, 'res_alloc>
+    ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc>
+{
     pub fn get<T, GpuResType>(
         &self,
         resource: impl std::ops::Deref<Target = RawResourceRef<T, GpuResType>>,
@@ -26,7 +29,7 @@ impl<'exec_params, 'device, 'shader_cache> ResourceRegistry<'exec_params, 'devic
         &self,
         shader_path: impl AsRef<Path>,
         shader_type: RenderShaderType,
-    ) -> Arc<ShaderCacheEntry> {
+    ) -> anyhow::Result<Arc<ShaderCacheEntry>> {
         self.execution_params.shader_cache.get_or_load(
             self.execution_params,
             shader_type,

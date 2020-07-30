@@ -22,7 +22,8 @@ fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::Textu
     let (output, output_ref) = pass.create(desc);
 
     pass.render(move |cb, registry| {
-        let shader = registry.shader("/assets/shaders/gradients.hlsl", RenderShaderType::Compute);
+        let shader =
+            registry.shader("/assets/shaders/gradients.hlsl", RenderShaderType::Compute)?;
         cb.rg_dispatch_2d(
             &shader,
             output_ref.dims(),
@@ -47,7 +48,7 @@ fn blur(rg: &mut rg::RenderGraph, input: &rg::TextureHandle) -> rg::TextureHandl
     let (output, output_ref) = pass.create(input.desc);
 
     pass.render(move |cb, registry| {
-        let shader = registry.shader("/assets/shaders/blur.hlsl", RenderShaderType::Compute);
+        let shader = registry.shader("/assets/shaders/blur.hlsl", RenderShaderType::Compute)?;
         cb.rg_dispatch_2d(
             &shader,
             input_ref.dims(),
@@ -71,7 +72,8 @@ fn into_ycbcr(rg: &mut rg::RenderGraph, mut input: rg::TextureHandle) -> rg::Tex
     let input_ref = pass.write(&mut input);
 
     pass.render(move |cb, registry| {
-        let shader = registry.shader("/assets/shaders/into_ycbcr.hlsl", RenderShaderType::Compute);
+        let shader =
+            registry.shader("/assets/shaders/into_ycbcr.hlsl", RenderShaderType::Compute)?;
         cb.rg_dispatch_2d(
             &shader,
             input_ref.dims(),

@@ -58,6 +58,11 @@ impl RenderGraph {
     }
 }
 
+pub trait ResourceHandleAllocator {
+    fn allocate_transient(&self, kind: RenderResourceType) -> RenderResourceHandle;
+    fn allocate_persistent(&self, kind: RenderResourceType) -> RenderResourceHandle;
+}
+
 #[derive(Default)]
 pub struct TrackedResourceHandles {
     pub transient: Vec<RenderResourceHandle>,
@@ -77,17 +82,19 @@ impl TrackingResourceHandleAllocator {
         }
     }
 
-    pub fn into_tracked(self) -> TrackedResourceHandles {
+    pub fn into_allocated_resources(self) -> TrackedResourceHandles {
         self.tracked.into_inner().unwrap()
     }
+}
 
-    pub fn allocate_transient(&self, kind: RenderResourceType) -> RenderResourceHandle {
+impl ResourceHandleAllocator for TrackingResourceHandleAllocator {
+    fn allocate_transient(&self, kind: RenderResourceType) -> RenderResourceHandle {
         let handle = self.handles.write().unwrap().allocate(kind);
         self.tracked.write().unwrap().transient.push(handle);
         handle
     }
 
-    pub fn allocate_persistent(&self, kind: RenderResourceType) -> RenderResourceHandle {
+    fn allocate_persistent(&self, kind: RenderResourceType) -> RenderResourceHandle {
         let handle = self.handles.write().unwrap().allocate(kind);
         self.tracked.write().unwrap().persistent.push(handle);
         handle
@@ -100,15 +107,14 @@ struct ResourceLifetime {
     last_access: usize,
 }
 
-pub struct RenderGraphExecutionParams<'device, 'shader_cache> {
-    pub handles: TrackingResourceHandleAllocator,
+pub struct RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc> {
     pub device: &'device dyn RenderDevice,
     pub shader_cache: &'shader_cache dyn ShaderCache,
+    pub handles: &'res_alloc dyn ResourceHandleAllocator,
 }
 
 #[derive(Default)]
 pub struct RenderGraphExecutionOutput {
-    pub allocated_resources: TrackedResourceHandles,
     pub output_texture: RenderResourceHandle,
 }
 
@@ -143,13 +149,13 @@ impl RenderGraph {
         resource_lifetimes
     }
 
-    pub fn execute<'device, 'shader_cache, 'cb, 'commands>(
+    pub fn execute<'device, 'shader_cache, 'cb, 'commands, 'res_alloc>(
         self,
-        params: RenderGraphExecutionParams<'device, 'shader_cache>,
+        params: RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc>,
         cb: &'cb mut RenderCommandList<'commands>,
         // TODO: use exported/imported resources instead
         get_output_texture: TextureHandle,
-    ) -> RenderGraphExecutionOutput {
+    ) -> anyhow::Result<RenderGraphExecutionOutput> {
         let resource_lifetimes = self.calculate_resource_lifetimes();
 
         /* println!(
@@ -201,7 +207,7 @@ impl RenderGraph {
 
         for pass in self.passes.into_iter() {
             // TODO: partial barrier cmds (destination access modes)
-            (pass.render_fn.unwrap())(cb, &resource_registry).expect("render pass");
+            (pass.render_fn.unwrap())(cb, &resource_registry)?;
         }
 
         // TODO: perform transitions
@@ -213,10 +219,7 @@ impl RenderGraph {
             GpuResource::Buffer(_) => unimplemented!(),
         };
 
-        RenderGraphExecutionOutput {
-            allocated_resources: params.handles.into_tracked(),
-            output_texture,
-        }
+        Ok(RenderGraphExecutionOutput { output_texture })
     }
 
     pub(crate) fn record_pass(&mut self, pass: RecordedPass) {
@@ -224,10 +227,7 @@ impl RenderGraph {
     }
 }
 
-type DynRenderFn = dyn FnOnce(
-    &mut RenderCommandList<'_>,
-    &ResourceRegistry,
-) -> std::result::Result<(), Box<dyn std::error::Error>>;
+type DynRenderFn = dyn FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> anyhow::Result<()>;
 
 #[derive(Default)]
 pub(crate) struct RecordedPass {

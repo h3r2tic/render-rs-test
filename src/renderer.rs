@@ -107,7 +107,7 @@ impl Drop for Renderer {
 #[derive(Default)]
 pub struct FrameResources {
     pub handles: Vec<RenderResourceHandle>,
-    pub present_done_fence: RenderResourceHandle,
+    pub resources_used_fence: Option<RenderResourceHandle>,
 }
 
 impl FrameResources {

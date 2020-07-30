@@ -5,7 +5,8 @@ use std::{fs::File, path::PathBuf, sync::Mutex};
 use turbosloth::*;
 
 lazy_static! {
-    static ref FILE_WATCHER: Mutex<Hotwatch> = Mutex::new(Hotwatch::new().unwrap());
+    static ref FILE_WATCHER: Mutex<Hotwatch> =
+        Mutex::new(Hotwatch::new_with_custom_delay(std::time::Duration::from_millis(200)).unwrap());
 }
 
 #[derive(Clone, Hash)]

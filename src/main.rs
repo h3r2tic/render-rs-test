@@ -4,9 +4,111 @@ mod renderer;
 mod shader_cache;
 mod shader_compiler;
 
-use render_core::{encoder::RenderCommandList, handles::*, types::*};
+use render_core::{device::RenderDevice, encoder::RenderCommandList, handles::*, types::*};
 use std::{collections::VecDeque, sync::Arc};
 use turbosloth::*;
+
+struct RenderLoop {
+    persistent_resources: Vec<RenderResourceHandle>,
+    retired_frames: VecDeque<Option<renderer::FrameResources>>,
+}
+
+impl RenderLoop {
+    fn new() -> Self {
+        let mut retired_frames: VecDeque<Option<renderer::FrameResources>> = Default::default();
+        retired_frames.push_back(None);
+        retired_frames.push_back(None);
+
+        Self {
+            persistent_resources: Default::default(),
+            retired_frames,
+        }
+    }
+
+    fn render_frame(
+        &mut self,
+        device: &mut dyn RenderDevice,
+        swapchain: RenderResourceHandle,
+        renderer: &renderer::Renderer,
+        shader_cache: &dyn rg::shader_cache::ShaderCache,
+    ) -> std::result::Result<(), anyhow::Error> {
+        if let Some(frame_resources) = self.retired_frames.pop_front().unwrap() {
+            device.wait_for_fence(frame_resources.present_done_fence)?;
+            frame_resources.destroy_now(&*device);
+        }
+
+        let mut frame_resources = renderer::FrameResources::default();
+
+        let main_command_list_handle =
+            renderer.allocate_frame_handle(RenderResourceType::CommandList, &mut frame_resources);
+        device.create_command_list(main_command_list_handle, "Main command list".into())?;
+
+        let mut cb =
+            RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
+
+        let output_texture = {
+            let (rg, tex) = crate::render_passes::render_frame_rg();
+
+            // println!("Recorded {} passes", rg.passes.len());
+            let mut rg_execution_output = rg.execute(
+                rg::RenderGraphExecutionParams {
+                    handles: rg::TrackingResourceHandleAllocator::new(renderer.handles.clone()),
+                    device: &*device,
+                    shader_cache: shader_cache,
+                },
+                &mut cb,
+                tex,
+            );
+
+            frame_resources
+                .handles
+                .append(&mut rg_execution_output.allocated_resources.transient);
+
+            self.persistent_resources
+                .append(&mut rg_execution_output.allocated_resources.persistent);
+            rg_execution_output.output_texture
+        };
+
+        device.compile_command_list(main_command_list_handle, &cb)?;
+
+        let submit_done_fence =
+            renderer.allocate_frame_handle(RenderResourceType::Fence, &mut frame_resources);
+        device.create_fence(
+            submit_done_fence,
+            &RenderFenceDesc {
+                cross_device: false,
+            },
+            "submit done fence".into(),
+        )?;
+
+        device.submit_command_list(main_command_list_handle, true, None, None, None)?;
+        frame_resources.present_done_fence = submit_done_fence;
+
+        device.present_swap_chain(swapchain, output_texture, Some(submit_done_fence))?;
+        device.advance_frame()?;
+
+        self.retired_frames.push_back(Some(frame_resources));
+
+        Ok(())
+    }
+
+    fn destroy_resources(
+        &mut self,
+        device: &dyn RenderDevice,
+    ) -> std::result::Result<(), anyhow::Error> {
+        for frame_resources in self.retired_frames.drain(..) {
+            if let Some(frame_resources) = frame_resources {
+                frame_resources.destroy_now(&*device);
+            }
+        }
+
+        for resource in self.persistent_resources.drain(..) {
+            device.destroy_resource(resource)?;
+        }
+
+        Ok(())
+    }
+}
 
 fn try_main() -> std::result::Result<(), anyhow::Error> {
     let mut renderer = renderer::Renderer::new();
@@ -69,68 +171,12 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
         swapchain
     };
 
-    let mut persistent_resources: Vec<RenderResourceHandle> = Default::default();
-    let mut retired_frames: VecDeque<Option<renderer::FrameResources>> = Default::default();
-    retired_frames.push_back(None);
-    retired_frames.push_back(None);
+    let mut render_loop = RenderLoop::new();
 
     let shader_cache = shader_cache::TurboslothShaderCache::new(LazyCache::create());
 
     for _ in 0..5 {
-        if let Some(frame_resources) = retired_frames.pop_front().unwrap() {
-            device.wait_for_fence(frame_resources.present_done_fence)?;
-            frame_resources.destroy_now(&mut **device);
-        }
-        let mut frame_resources = renderer::FrameResources::default();
-
-        let main_command_list_handle =
-            renderer.allocate_frame_handle(RenderResourceType::CommandList, &mut frame_resources);
-        device.create_command_list(main_command_list_handle, "Main command list".into())?;
-
-        let mut cb =
-            RenderCommandList::new(renderer.handles.clone(), 1024 * 1024 * 16, 1024 * 1024)?;
-
-        let output_texture = {
-            let (rg, tex) = crate::render_passes::render_frame_rg();
-
-            // println!("Recorded {} passes", rg.passes.len());
-            let mut rg_execution_output = rg.execute(
-                rg::RenderGraphExecutionParams {
-                    handles: rg::TrackingResourceHandleAllocator::new(renderer.handles.clone()),
-                    device: &**device,
-                    shader_cache: &shader_cache,
-                },
-                &mut cb,
-                tex,
-            );
-
-            frame_resources
-                .handles
-                .append(&mut rg_execution_output.allocated_resources.transient);
-
-            persistent_resources.append(&mut rg_execution_output.allocated_resources.persistent);
-            rg_execution_output.output_texture
-        };
-
-        device.compile_command_list(main_command_list_handle, &cb)?;
-
-        let submit_done_fence =
-            renderer.allocate_frame_handle(RenderResourceType::Fence, &mut frame_resources);
-        device.create_fence(
-            submit_done_fence,
-            &RenderFenceDesc {
-                cross_device: false,
-            },
-            "submit done fence".into(),
-        )?;
-
-        device.submit_command_list(main_command_list_handle, true, None, None, None)?;
-        frame_resources.present_done_fence = submit_done_fence;
-
-        device.present_swap_chain(swapchain, output_texture, Some(submit_done_fence))?;
-        device.advance_frame()?;
-
-        retired_frames.push_back(Some(frame_resources));
+        render_loop.render_frame(&mut **device, swapchain, &renderer, &shader_cache)?;
 
         // Slow down rendering so the window stays up for a while
         // Comment-out to test synchronization issues.
@@ -138,16 +184,7 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
     }
 
     device.device_wait_idle()?;
-
-    for frame_resources in retired_frames.drain(..) {
-        if let Some(frame_resources) = frame_resources {
-            frame_resources.destroy_now(&mut **device);
-        }
-    }
-
-    for resource in persistent_resources.drain(..) {
-        device.destroy_resource(resource)?;
-    }
+    render_loop.destroy_resources(&**device)?;
 
     device.destroy_resource(swapchain)?;
 

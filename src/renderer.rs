@@ -111,7 +111,7 @@ pub struct FrameResources {
 }
 
 impl FrameResources {
-    pub fn destroy_now(self, device: &mut dyn RenderDevice) {
+    pub fn destroy_now(self, device: &dyn RenderDevice) {
         for handle in self.handles {
             device.destroy_resource(handle).unwrap();
         }

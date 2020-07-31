@@ -115,35 +115,22 @@ where
     }
 }
 
-pub enum GpuResource {
-    Image(RenderResourceHandle),
-
-    #[allow(dead_code)]
-    Buffer(RenderResourceHandle),
-}
-
 #[derive(Clone, Copy)]
 pub struct GpuSrv(pub RenderResourceHandle);
 pub struct GpuUav(pub RenderResourceHandle);
 
 pub trait ToGpuResourceView {
-    fn to_gpu_resource_view(gpu_res: &GpuResource) -> Self;
+    fn to_gpu_resource_view(res: RenderResourceHandle) -> Self;
 }
 
 impl ToGpuResourceView for GpuSrv {
-    fn to_gpu_resource_view(res: &GpuResource) -> Self {
-        match res {
-            GpuResource::Buffer(handle) => Self(*handle),
-            GpuResource::Image(handle) => Self(*handle),
-        }
+    fn to_gpu_resource_view(res: RenderResourceHandle) -> Self {
+        Self(res)
     }
 }
 
 impl ToGpuResourceView for GpuUav {
-    fn to_gpu_resource_view(res: &GpuResource) -> Self {
-        match res {
-            GpuResource::Buffer(handle) => Self(*handle),
-            GpuResource::Image(handle) => Self(*handle),
-        }
+    fn to_gpu_resource_view(res: RenderResourceHandle) -> Self {
+        Self(res)
     }
 }

@@ -176,7 +176,7 @@ impl RenderGraph {
         let handles = &params.handles;
         let device = params.device;
 
-        let gpu_resources: Vec<GpuResource> = self
+        let gpu_resources: Vec<RenderResourceHandle> = self
             .resources
             .iter()
             .map(|resource: &GraphResourceCreateInfo| match resource.desc {
@@ -201,7 +201,7 @@ impl RenderGraph {
                         )
                         .unwrap();
 
-                    GpuResource::Image(handle)
+                    handle
                 }
             })
             .collect();
@@ -219,10 +219,8 @@ impl RenderGraph {
         // TODO: perform transitions
         //todo!("run the recorded commands");
 
-        let output_texture = match resource_registry.resources[get_output_texture.raw.id as usize] {
-            GpuResource::Image(tex) => tex,
-            GpuResource::Buffer(_) => unimplemented!(),
-        };
+        let output_texture = resource_registry.resources[get_output_texture.raw.id as usize];
+        assert!(output_texture.get_type() == RenderResourceType::Texture);
 
         Ok(RenderGraphExecutionOutput { output_texture })
     }

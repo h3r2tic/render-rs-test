@@ -6,7 +6,7 @@ use std::{path::Path, sync::Arc};
 pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc> {
     pub execution_params:
         &'exec_params RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc>,
-    pub(crate) resources: Vec<GpuResource>,
+    pub(crate) resources: Vec<RenderResourceHandle>,
 }
 
 impl<'exec_params, 'device, 'shader_cache, 'res_alloc>
@@ -18,7 +18,7 @@ impl<'exec_params, 'device, 'shader_cache, 'res_alloc>
     {
         // println!("ResourceRegistry::get: {:?}", resource.handle);
         <GpuResType as ToGpuResourceView>::to_gpu_resource_view(
-            &self.resources[resource.handle.id as usize],
+            self.resources[resource.handle.id as usize],
         )
     }
 

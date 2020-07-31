@@ -8,11 +8,14 @@ pub mod srv {
     use crate::resource::*;
 
     pub struct RgSrv {
-        pub rg_ref: TextureRef<GpuSrv>,
+        // TODO: non-texture
+        pub rg_ref: Ref<Texture, GpuSrv>,
     }
 
-    pub fn texture_2d(rg_ref: TextureRef<GpuSrv>) -> RgSrv {
-        RgSrv { rg_ref }
+    pub fn texture_2d(rg_ref: Ref<Texture, GpuSrv>) -> RgSrv {
+        RgSrv {
+            rg_ref: rg_ref.internal_clone(),
+        }
     }
 }
 
@@ -20,10 +23,11 @@ pub mod uav {
     use crate::resource::*;
 
     pub struct RgUav {
-        pub rg_ref: TextureRef<GpuUav>,
+        // TODO: non-texture
+        pub rg_ref: Ref<Texture, GpuUav>,
     }
 
-    pub fn texture_2d(rg_ref: TextureRef<GpuUav>) -> RgUav {
+    pub fn texture_2d(rg_ref: Ref<Texture, GpuUav>) -> RgUav {
         RgUav { rg_ref }
     }
 }

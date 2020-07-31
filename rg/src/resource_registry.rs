@@ -12,10 +12,7 @@ pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc> {
 impl<'exec_params, 'device, 'shader_cache, 'res_alloc>
     ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc>
 {
-    pub fn get<T, GpuResType>(
-        &self,
-        resource: impl std::ops::Deref<Target = RawResourceRef<T, GpuResType>>,
-    ) -> GpuResType
+    pub fn get<T: Resource, GpuResType>(&self, resource: Ref<T, GpuResType>) -> GpuResType
     where
         GpuResType: ToGpuResourceView,
     {

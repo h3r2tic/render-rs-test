@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use crate::{
-    context::RenderGraphContext, resource::*, resource_registry::ResourceRegistry, shader_cache::*,
+    pass_builder::PassBuilder, resource::*, resource_registry::ResourceRegistry, shader_cache::*,
 };
 
 use render_core::{
@@ -22,18 +22,18 @@ use std::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub enum GenericResourceDesc {
+pub enum GraphResourceDesc {
     Texture(TextureDesc),
 }
 
-impl From<TextureDesc> for GenericResourceDesc {
+impl From<TextureDesc> for GraphResourceDesc {
     fn from(desc: TextureDesc) -> Self {
         Self::Texture(desc)
     }
 }
 
 pub(crate) struct GraphResourceCreateInfo {
-    pub desc: GenericResourceDesc,
+    pub desc: GraphResourceDesc,
     pub create_pass_idx: usize,
 }
 
@@ -125,10 +125,10 @@ pub struct RenderGraphExecutionOutput {
 }
 
 impl RenderGraph {
-    pub fn begin_pass<'s>(&'s mut self) -> RenderGraphContext<'s> {
+    pub fn add_pass<'s>(&'s mut self) -> PassBuilder<'s> {
         let pass_idx = self.passes.len();
 
-        RenderGraphContext {
+        PassBuilder {
             rg: self,
             pass_idx,
             pass: Some(Default::default()),
@@ -160,7 +160,7 @@ impl RenderGraph {
         params: RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc>,
         cb: &'cb mut RenderCommandList<'commands>,
         // TODO: use exported/imported resources instead
-        get_output_texture: TextureHandle,
+        get_output_texture: Handle<Texture>,
     ) -> anyhow::Result<RenderGraphExecutionOutput> {
         let resource_lifetimes = self.calculate_resource_lifetimes();
 
@@ -180,7 +180,7 @@ impl RenderGraph {
             .resources
             .iter()
             .map(|resource: &GraphResourceCreateInfo| match resource.desc {
-                GenericResourceDesc::Texture(desc) => {
+                GraphResourceDesc::Texture(desc) => {
                     let handle = handles.allocate_transient(RenderResourceType::Texture);
                     device
                         .create_texture(
@@ -219,8 +219,7 @@ impl RenderGraph {
         // TODO: perform transitions
         //todo!("run the recorded commands");
 
-        let output_texture = match resource_registry.resources[get_output_texture.0.raw.id as usize]
-        {
+        let output_texture = match resource_registry.resources[get_output_texture.raw.id as usize] {
             GpuResource::Image(tex) => tex,
             GpuResource::Buffer(_) => unimplemented!(),
         };
@@ -239,6 +238,5 @@ type DynRenderFn = dyn FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> 
 pub(crate) struct RecordedPass {
     pub read: Vec<GraphRawResourceHandle>,
     pub write: Vec<GraphRawResourceHandle>,
-    pub create: Vec<GraphRawResourceHandle>,
     pub render_fn: Option<Box<DynRenderFn>>,
 }

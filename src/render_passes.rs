@@ -1,6 +1,6 @@
 use rg::{command_ext::*, resource_view::*};
 
-pub fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
+pub fn render_frame_rg() -> (rg::RenderGraph, rg::Handle<rg::Texture>) {
     let mut rg = rg::RenderGraph::new();
 
     let tex = synth_gradients(
@@ -17,16 +17,16 @@ pub fn render_frame_rg() -> (rg::RenderGraph, rg::TextureHandle) {
     (rg, tex)
 }
 
-fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::TextureHandle {
-    let mut pass = rg.begin_pass();
-    let (output, output_ref) = pass.create(desc);
+fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::Handle<rg::Texture> {
+    let mut pass = rg.add_pass();
+    let (output, output_ref) = pass.create(&desc);
 
     pass.render(move |cb, registry| {
         let shader =
             registry.shader("/assets/shaders/gradients.hlsl", RenderShaderType::Compute)?;
         cb.rg_dispatch_2d(
             &shader,
-            output_ref.dims(),
+            output_ref.desc().dims(),
             &[RenderShaderArgument {
                 shader_views: Some(shader.named_views(
                     registry,
@@ -42,16 +42,16 @@ fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::Textu
     output
 }
 
-fn blur(rg: &mut rg::RenderGraph, input: &rg::TextureHandle) -> rg::TextureHandle {
-    let mut pass = rg.begin_pass();
+fn blur(rg: &mut rg::RenderGraph, input: &rg::Handle<rg::Texture>) -> rg::Handle<rg::Texture> {
+    let mut pass = rg.add_pass();
     let input_ref = pass.read(input);
-    let (output, output_ref) = pass.create(input.desc);
+    let (output, output_ref) = pass.create(input.desc());
 
     pass.render(move |cb, registry| {
         let shader = registry.shader("/assets/shaders/blur.hlsl", RenderShaderType::Compute)?;
         cb.rg_dispatch_2d(
             &shader,
-            input_ref.dims(),
+            input_ref.desc().dims(),
             &[RenderShaderArgument {
                 shader_views: Some(shader.named_views(
                     registry,
@@ -67,8 +67,11 @@ fn blur(rg: &mut rg::RenderGraph, input: &rg::TextureHandle) -> rg::TextureHandl
     output
 }
 
-fn into_ycbcr(rg: &mut rg::RenderGraph, mut input: rg::TextureHandle) -> rg::TextureHandle {
-    let mut pass = rg.begin_pass();
+fn into_ycbcr(
+    rg: &mut rg::RenderGraph,
+    mut input: rg::Handle<rg::Texture>,
+) -> rg::Handle<rg::Texture> {
+    let mut pass = rg.add_pass();
     let input_ref = pass.write(&mut input);
 
     pass.render(move |cb, registry| {
@@ -76,7 +79,7 @@ fn into_ycbcr(rg: &mut rg::RenderGraph, mut input: rg::TextureHandle) -> rg::Tex
             registry.shader("/assets/shaders/into_ycbcr.hlsl", RenderShaderType::Compute)?;
         cb.rg_dispatch_2d(
             &shader,
-            input_ref.dims(),
+            input_ref.desc().dims(),
             &[RenderShaderArgument {
                 shader_views: Some(shader.named_views(
                     registry,

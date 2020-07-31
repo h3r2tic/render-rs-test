@@ -1,10 +1,29 @@
 use render_core::handles::*;
 use std::marker::PhantomData;
 
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub struct Texture;
+
+pub trait Resource {
+    type Desc: ResourceDesc;
+}
+
+impl Resource for Texture {
+    type Desc = TextureDesc;
+}
+
+pub trait ResourceDesc: Clone + std::fmt::Debug + Into<crate::graph::GraphResourceDesc> {
+    type Resource: Resource;
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct TextureDesc {
     pub width: u32,
     pub height: u32,
+}
+
+impl ResourceDesc for TextureDesc {
+    type Resource = Texture;
 }
 
 impl TextureDesc {
@@ -12,11 +31,6 @@ impl TextureDesc {
         [self.width, self.height]
     }
 }
-
-pub trait ResourceDescTraits: std::fmt::Debug {
-    //type HandleType;
-}
-impl<DescType> ResourceDescTraits for DescType where DescType: std::fmt::Debug {}
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub(crate) struct GraphRawResourceHandle {
@@ -33,88 +47,72 @@ impl GraphRawResourceHandle {
     }
 }
 
-#[derive(Debug)]
-pub struct ResourceHandle<DescType>
-where
-    DescType: ResourceDescTraits,
-{
+#[derive(Clone, Debug)]
+pub struct Handle<ResType: Resource> {
     pub(crate) raw: GraphRawResourceHandle,
-    pub desc: DescType,
+    pub(crate) desc: <ResType as Resource>::Desc,
+    pub(crate) marker: PhantomData<ResType>,
 }
 
-impl<DescType> PartialEq for ResourceHandle<DescType>
-where
-    DescType: ResourceDescTraits,
-{
+impl<ResType: Resource> PartialEq for Handle<ResType> {
     fn eq(&self, other: &Self) -> bool {
         self.raw == other.raw
     }
 }
 
-impl<DescType> Eq for ResourceHandle<DescType> where DescType: ResourceDescTraits {}
-
-#[derive(Debug)]
-pub struct RawResourceRef<DescType, AccessMode> {
-    pub(crate) desc: DescType,
-    pub(crate) handle: GraphRawResourceHandle,
-    pub(crate) marker: PhantomData<(DescType, AccessMode)>,
-}
-
-impl<DescType, AccessMode> std::ops::Deref for RawResourceRef<DescType, AccessMode> {
-    type Target = DescType;
-
-    fn deref(&self) -> &Self::Target {
+impl<ResType: Resource> Handle<ResType> {
+    pub fn desc(&self) -> &<ResType as Resource>::Desc {
         &self.desc
     }
 }
 
-impl<DescType, AccessMode> Clone for RawResourceRef<DescType, AccessMode>
+impl<ResType: Resource> Eq for Handle<ResType> {}
+
+#[derive(Debug)]
+pub struct Ref<ResType: Resource, AccessMode> {
+    pub(crate) handle: GraphRawResourceHandle,
+    pub(crate) desc: <ResType as Resource>::Desc,
+    pub(crate) marker: PhantomData<(ResType, AccessMode)>,
+}
+
+impl<ResType: Resource, AccessMode> Ref<ResType, AccessMode> {
+    pub fn desc(&self) -> &<ResType as Resource>::Desc {
+        &self.desc
+    }
+}
+
+impl<ResType: Resource, AccessMode> Clone for Ref<ResType, AccessMode>
 where
-    DescType: Clone,
+    <ResType as Resource>::Desc: Clone,
     AccessMode: Clone,
 {
     fn clone(&self) -> Self {
         Self {
-            desc: self.desc.clone(),
             handle: self.handle.clone(),
+            desc: self.desc.clone(),
             marker: PhantomData,
         }
     }
 }
 
-impl<DescType, AccessMode> Copy for RawResourceRef<DescType, AccessMode>
+impl<ResType: Resource, AccessMode> Copy for Ref<ResType, AccessMode>
 where
-    DescType: Copy,
+    <ResType as Resource>::Desc: Copy,
     AccessMode: Copy,
 {
 }
 
-impl<DescType, AccessMode> RawResourceRef<DescType, AccessMode>
+impl<ResType: Resource, AccessMode> Ref<ResType, AccessMode>
 where
-    DescType: Copy,
+    <ResType as Resource>::Desc: Copy,
 {
-    fn internal_clone(&self) -> Self {
-        Self {
-            desc: self.desc,
+    pub(crate) fn internal_clone(&self) -> Ref<ResType, AccessMode> {
+        Ref {
             handle: self.handle,
+            desc: self.desc,
             marker: PhantomData,
         }
     }
-}
-
-pub trait CreateReference<AccessMode>: Sized + Clone {
-    type RefType;
-
-    fn create(r: RawResourceRef<Self, AccessMode>) -> Self::RefType;
-}
-
-pub trait CreateHandle: Sized + Clone
-where
-    Self: ResourceDescTraits,
-{
-    type HandleType: std::ops::Deref<Target = ResourceHandle<Self>>;
-
-    fn create(r: ResourceHandle<Self>) -> Self::HandleType;
 }
 
 pub enum GpuResource {
@@ -149,68 +147,3 @@ impl ToGpuResourceView for GpuUav {
         }
     }
 }
-
-macro_rules! def_resource_handles {
-    ($handle_type:ident, $ref_type:ident, $desc_type:ident) => {
-        #[derive(Debug, PartialEq, Eq)]
-        pub struct $handle_type(pub(crate) ResourceHandle<$desc_type>);
-
-        impl std::ops::Deref for $handle_type {
-            type Target = ResourceHandle<$desc_type>;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl std::ops::DerefMut for $handle_type {
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.0
-            }
-        }
-
-        pub struct $ref_type<AccessMode>(pub(crate) RawResourceRef<$desc_type, AccessMode>);
-
-        impl<AccessMode> $ref_type<AccessMode> {
-            pub(crate) fn internal_clone(&self) -> Self {
-                Self(self.0.internal_clone())
-            }
-        }
-
-        impl<AccessMode> std::ops::Deref for $ref_type<AccessMode> {
-            type Target = RawResourceRef<$desc_type, AccessMode>;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl<AccessMode> Clone for $ref_type<AccessMode>
-        where
-            AccessMode: Clone,
-        {
-            fn clone(&self) -> Self {
-                Self(self.0.clone())
-            }
-        }
-        impl<AccessMode> Copy for $ref_type<AccessMode> where AccessMode: Copy {}
-
-        impl<AccessMode> CreateReference<AccessMode> for $desc_type {
-            type RefType = $ref_type<AccessMode>;
-
-            fn create(r: RawResourceRef<Self, AccessMode>) -> Self::RefType {
-                $ref_type(r)
-            }
-        }
-
-        impl CreateHandle for $desc_type {
-            type HandleType = $handle_type;
-
-            fn create(r: ResourceHandle<Self>) -> Self::HandleType {
-                $handle_type(r)
-            }
-        }
-    };
-}
-
-def_resource_handles! { TextureHandle, TextureRef, TextureDesc }

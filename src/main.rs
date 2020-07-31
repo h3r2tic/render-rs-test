@@ -1,79 +1,87 @@
 mod file;
+mod render_device;
 mod render_loop;
 mod render_passes;
-mod renderer;
 mod shader_cache;
 mod shader_compiler;
 
-use render_core::types::*;
-use std::sync::Arc;
+use render_core::{
+    device::RenderDevice, handles::RenderResourceHandleAllocator, system::RenderSystem, types::*,
+};
+use render_device::create_render_device;
+use std::sync::{Arc, RwLock};
 use turbosloth::*;
 
-fn try_main() -> std::result::Result<(), anyhow::Error> {
-    let mut renderer = renderer::Renderer::new();
+pub trait HandleAllocator {
+    fn allocate(&self, kind: RenderResourceType) -> RenderResourceHandle;
+}
 
-    let render_system = &mut renderer.render_system;
-    let registry = Arc::clone(&render_system.get_registry().unwrap());
-    let registry_read = registry.read().unwrap();
-
-    assert!(registry_read.len() > 0);
-
-    for entry in registry_read.iter() {
-        let device_info = Arc::new(
-            render_system
-                .enumerate_devices(&entry, false, None, None)
-                .unwrap(),
-        );
-        let info_list = Arc::clone(&device_info);
-        assert!(info_list.len() > 0);
-
-        // println!("{:#?}", info_list);
+impl HandleAllocator for Arc<RwLock<RenderResourceHandleAllocator>> {
+    fn allocate(&self, kind: RenderResourceType) -> RenderResourceHandle {
+        self.write().unwrap().allocate(kind)
     }
+}
 
-    let mut device = renderer.device.write().unwrap();
-    let device = device.as_mut().expect("device");
+fn create_swap_chain(
+    handles: impl HandleAllocator,
+    device: &dyn RenderDevice,
+    window: Arc<winit::Window>,
+    width: u32,
+    height: u32,
+) -> anyhow::Result<RenderResourceHandle> {
+    let swapchain = handles.allocate(RenderResourceType::SwapChain);
+    use raw_window_handle::{HasRawWindowHandle as _, RawWindowHandle};
+
+    device.create_swap_chain(
+        swapchain,
+        &RenderSwapChainDesc {
+            width,
+            height,
+            format: RenderFormat::R10g10b10a2Unorm,
+            buffer_count: 3,
+            window: match window.raw_window_handle() {
+                RawWindowHandle::Windows(handle) => RenderSwapChainWindow {
+                    hinstance: handle.hinstance,
+                    hwnd: handle.hwnd,
+                },
+                _ => todo!(),
+            },
+        },
+        "Main swap chain".into(),
+    )?;
+
+    Ok(swapchain)
+}
+
+fn try_main() -> std::result::Result<(), anyhow::Error> {
+    let render_system = Arc::new(RwLock::new(RenderSystem::new()));
+    let device = create_render_device(render_system)?;
+    let handles = Arc::new(RwLock::new(RenderResourceHandleAllocator::new()));
 
     let width = 1280u32;
     let height = 720u32;
 
     let events_loop = winit::EventsLoop::new();
-    let window = winit::WindowBuilder::new()
-        .with_title("render-rs test")
-        .with_dimensions(winit::dpi::LogicalSize::new(width as f64, height as f64))
-        .build(&events_loop)
-        .expect("window");
-    let window = Arc::new(window);
+    let window = Arc::new(
+        winit::WindowBuilder::new()
+            .with_title("render-rs test")
+            .with_dimensions(winit::dpi::LogicalSize::new(width as f64, height as f64))
+            .build(&events_loop)
+            .expect("window"),
+    );
 
-    let swapchain = {
-        let swapchain = renderer.allocate_handle(RenderResourceType::SwapChain);
-
-        use raw_window_handle::{HasRawWindowHandle as _, RawWindowHandle};
-
-        device.create_swap_chain(
-            swapchain,
-            &RenderSwapChainDesc {
-                width,
-                height,
-                format: RenderFormat::R10g10b10a2Unorm,
-                buffer_count: 3,
-                window: match window.raw_window_handle() {
-                    RawWindowHandle::Windows(handle) => RenderSwapChainWindow {
-                        hinstance: handle.hinstance,
-                        hwnd: handle.hwnd,
-                    },
-                    _ => todo!(),
-                },
-            },
-            "Main swap chain".into(),
-        )?;
-
-        swapchain
-    };
+    let swapchain = create_swap_chain(
+        handles.clone(),
+        &*device.read()?,
+        window.clone(),
+        width,
+        height,
+    )?;
 
     let shader_cache = shader_cache::TurboslothShaderCache::new(LazyCache::create());
 
-    let error_output_texture = renderer.allocate_handle(RenderResourceType::Texture);
-    device.create_texture(
+    let error_output_texture = handles.allocate(RenderResourceType::Texture);
+    device.read()?.create_texture(
         error_output_texture,
         &RenderTextureDesc {
             texture_type: RenderTextureType::Tex2d,
@@ -89,11 +97,16 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
         "error output texture".into(),
     )?;
 
-    let mut render_loop = render_loop::RenderLoop::new(error_output_texture);
+    let mut render_loop = render_loop::RenderLoop::new(device.clone(), error_output_texture);
     let mut last_error_text = None;
 
-    for _ in 0..50 {
-        match render_loop.render_frame(&mut **device, swapchain, &renderer, &shader_cache) {
+    for _ in 0..5 {
+        match render_loop.render_frame(
+            swapchain,
+            &shader_cache,
+            handles.clone(),
+            crate::render_passes::render_frame_rg,
+        ) {
             Ok(()) => {
                 last_error_text = None;
             }
@@ -111,10 +124,9 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    device.device_wait_idle()?;
-    render_loop.destroy_resources(&**device)?;
-    device.destroy_resource(error_output_texture)?;
-    device.destroy_resource(swapchain)?;
+    device.write()?.device_wait_idle()?;
+    device.write()?.destroy_resource(error_output_texture)?;
+    device.write()?.destroy_resource(swapchain)?;
 
     Ok(())
 }

@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use byte_slice_cast::IntoByteVec;
 use relative_path::{RelativePath, RelativePathBuf};
 use shader_prepper;
@@ -26,7 +26,7 @@ impl LazyWorker for CompileComputeShader {
             &mut ShaderIncludeProvider { ctx: ctx.clone() },
             String::new(),
         );
-        let source = source.map_err(|err| anyhow::anyhow!("{}", err))?;
+        let source = source.map_err(|err| anyhow!("{}", err))?;
 
         let ext = self
             .path
@@ -70,7 +70,7 @@ fn compile_cs_hlsl_impl(
         let t0 = std::time::Instant::now();
         let spirv =
             hassle_rs::compile_hlsl(&name, &source_text, "main", "cs_6_4", &["-spirv"], &[])
-                .map_err(|err| anyhow::anyhow!("{}", err))?;
+                .map_err(|err| anyhow!("{}", err))?;
         println!("dxc took {:?}", t0.elapsed());
 
         use byte_slice_cast::*;
@@ -174,12 +174,12 @@ fn get_cs_local_size_from_spirv(spirv: &[u32]) -> Result<[u32; 3]> {
         }
     }
 
-    bail!("Could not find a ExecutionMode SPIR-V op");
+    Err(anyhow!("Could not find a ExecutionMode SPIR-V op"))
 }
 
 fn convert_spirv_reflect_err<T>(res: std::result::Result<T, &'static str>) -> Result<T> {
     match res {
         Ok(res) => Ok(res),
-        Err(e) => bail!("SPIR-V reflection error: {}", e),
+        Err(e) => Err(anyhow!("SPIR-V reflection error: {}", e)),
     }
 }

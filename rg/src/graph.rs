@@ -22,8 +22,14 @@ use std::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum GenericResourceDesc {
+pub enum GenericResourceDesc {
     Texture(TextureDesc),
+}
+
+impl From<TextureDesc> for GenericResourceDesc {
+    fn from(desc: TextureDesc) -> Self {
+        Self::Texture(desc)
+    }
 }
 
 pub(crate) struct GraphResourceCreateInfo {

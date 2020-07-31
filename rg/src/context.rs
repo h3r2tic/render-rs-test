@@ -20,24 +20,35 @@ impl<'s> Drop for RenderGraphContext<'s> {
 }
 
 impl<'rg> RenderGraphContext<'rg> {
-    pub fn create(&mut self, desc: TextureDesc) -> (TextureHandle, TextureRef<GpuUav>) {
-        let handle: TextureHandle = TextureHandle(ResourceHandle {
+    pub fn create<DescType>(
+        &mut self,
+        desc: DescType,
+    ) -> (
+        <DescType as CreateHandle>::HandleType,
+        <DescType as CreateReference<GpuUav>>::RefType,
+    )
+    where
+        DescType: CreateReference<GpuUav> + CreateHandle,
+        DescType: Into<GenericResourceDesc>,
+    {
+        let handle = <DescType as CreateHandle>::create(ResourceHandle {
             raw: self.rg.create_raw_resource(GraphResourceCreateInfo {
-                desc: GenericResourceDesc::Texture(desc),
+                desc: desc.clone().into(),
                 create_pass_idx: self.pass_idx,
             }),
-            desc,
+            desc: desc.clone(),
         });
 
-        self.pass.as_mut().unwrap().create.push(handle.0.raw);
+        self.pass.as_mut().unwrap().create.push(handle.raw);
 
         let reference = RawResourceRef {
-            desc,
-            handle: handle.0.raw,
+            desc: desc.clone(),
+            handle: handle.raw,
             marker: PhantomData,
         };
+        let reference = <DescType as CreateReference<GpuUav>>::create(reference);
 
-        (handle, TextureRef(reference))
+        (handle, reference)
     }
 
     pub fn read<DescType>(

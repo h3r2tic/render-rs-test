@@ -13,7 +13,9 @@ impl TextureDesc {
     }
 }
 
-pub trait ResourceDescTraits: std::fmt::Debug {}
+pub trait ResourceDescTraits: std::fmt::Debug {
+    //type HandleType;
+}
 impl<DescType> ResourceDescTraits for DescType where DescType: std::fmt::Debug {}
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -106,6 +108,15 @@ pub trait CreateReference<AccessMode>: Sized + Clone {
     fn create(r: RawResourceRef<Self, AccessMode>) -> Self::RefType;
 }
 
+pub trait CreateHandle: Sized + Clone
+where
+    Self: ResourceDescTraits,
+{
+    type HandleType: std::ops::Deref<Target = ResourceHandle<Self>>;
+
+    fn create(r: ResourceHandle<Self>) -> Self::HandleType;
+}
+
 pub enum GpuResource {
     Image(RenderResourceHandle),
 
@@ -166,14 +177,6 @@ macro_rules! def_resource_handles {
             }
         }
 
-        impl<AccessMode> CreateReference<AccessMode> for $desc_type {
-            type RefType = $ref_type<AccessMode>;
-
-            fn create(r: RawResourceRef<Self, AccessMode>) -> Self::RefType {
-                $ref_type(r)
-            }
-        }
-
         impl<AccessMode> std::ops::Deref for $ref_type<AccessMode> {
             type Target = RawResourceRef<$desc_type, AccessMode>;
 
@@ -191,6 +194,22 @@ macro_rules! def_resource_handles {
             }
         }
         impl<AccessMode> Copy for $ref_type<AccessMode> where AccessMode: Copy {}
+
+        impl<AccessMode> CreateReference<AccessMode> for $desc_type {
+            type RefType = $ref_type<AccessMode>;
+
+            fn create(r: RawResourceRef<Self, AccessMode>) -> Self::RefType {
+                $ref_type(r)
+            }
+        }
+
+        impl CreateHandle for $desc_type {
+            type HandleType = $handle_type;
+
+            fn create(r: ResourceHandle<Self>) -> Self::HandleType {
+                $handle_type(r)
+            }
+        }
     };
 }
 

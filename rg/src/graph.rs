@@ -1,7 +1,8 @@
 #![allow(unused_imports)]
 
 use crate::{
-    pass_builder::PassBuilder, resource::*, resource_registry::ResourceRegistry, shader_cache::*,
+    pass_builder::PassBuilder, pipeline_cache::PipelineCache, resource::*,
+    resource_registry::ResourceRegistry, shader_cache::*,
 };
 
 use render_core::{
@@ -113,9 +114,9 @@ struct ResourceLifetime {
     last_access: usize,
 }
 
-pub struct RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc> {
+pub struct RenderGraphExecutionParams<'device, 'pipeline_cache, 'res_alloc> {
     pub device: &'device dyn RenderDevice,
-    pub shader_cache: &'shader_cache dyn ShaderCache,
+    pub pipeline_cache: &'pipeline_cache PipelineCache,
     pub handles: &'res_alloc dyn ResourceHandleAllocator,
 }
 
@@ -155,9 +156,9 @@ impl RenderGraph {
         resource_lifetimes
     }
 
-    pub fn execute<'device, 'shader_cache, 'cb, 'commands, 'res_alloc>(
+    pub fn execute<'device, 'pipeline_cache, 'cb, 'commands, 'res_alloc>(
         self,
-        params: RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc>,
+        params: RenderGraphExecutionParams<'device, 'pipeline_cache, 'res_alloc>,
         cb: &'cb mut RenderCommandList<'commands>,
         // TODO: use exported/imported resources instead
         get_output_texture: Handle<Texture>,

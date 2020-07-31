@@ -78,7 +78,9 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
         height,
     )?;
 
-    let shader_cache = shader_cache::TurboslothShaderCache::new(LazyCache::create());
+    let pipeline_cache = rg::pipeline_cache::PipelineCache::new(
+        shader_cache::TurboslothShaderCache::new(LazyCache::create()),
+    );
 
     let error_output_texture = handles.allocate(RenderResourceType::Texture);
     device.read()?.create_texture(
@@ -103,7 +105,7 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
     for _ in 0..5 {
         match render_loop.render_frame(
             swapchain,
-            &shader_cache,
+            &pipeline_cache,
             handles.clone(),
             crate::render_passes::render_frame_rg,
         ) {

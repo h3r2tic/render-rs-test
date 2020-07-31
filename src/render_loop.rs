@@ -31,7 +31,7 @@ impl RenderLoop {
     pub fn render_frame(
         &mut self,
         swapchain: RenderResourceHandle,
-        shader_cache: &dyn rg::shader_cache::ShaderCache,
+        pipeline_cache: &rg::pipeline_cache::PipelineCache,
         handles: Arc<RwLock<RenderResourceHandleAllocator>>,
         graph_gen_fn: impl FnOnce() -> (rg::RenderGraph, rg::Handle<rg::Texture>),
     ) -> anyhow::Result<()> {
@@ -64,7 +64,7 @@ impl RenderLoop {
                 rg::RenderGraphExecutionParams {
                     handles: &handle_allocator,
                     device: &*device,
-                    shader_cache: shader_cache,
+                    pipeline_cache,
                 },
                 &mut cb,
                 tex,

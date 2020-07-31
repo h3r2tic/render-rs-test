@@ -1,11 +1,11 @@
-use rg::{command_ext::*, resource_view::*};
+use rg::{command_ext::*, resource_view::*, *};
 
-pub fn render_frame_rg() -> (rg::RenderGraph, rg::Handle<rg::Texture>) {
-    let mut rg = rg::RenderGraph::new();
+pub fn render_frame_rg() -> (RenderGraph, Handle<Texture>) {
+    let mut rg = RenderGraph::new();
 
     let tex = synth_gradients(
         &mut rg,
-        rg::TextureDesc {
+        TextureDesc {
             width: 1280,
             height: 720,
         },
@@ -17,18 +17,17 @@ pub fn render_frame_rg() -> (rg::RenderGraph, rg::Handle<rg::Texture>) {
     (rg, tex)
 }
 
-fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::Handle<rg::Texture> {
+fn synth_gradients(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
     let mut pass = rg.add_pass();
     let (output, output_ref) = pass.create(&desc);
 
     pass.render(move |cb, registry| {
-        let shader =
-            registry.shader("/assets/shaders/gradients.hlsl", RenderShaderType::Compute)?;
+        let pipeline = registry.compute_pipeline("/assets/shaders/gradients.hlsl")?;
         cb.rg_dispatch_2d(
-            &shader,
+            &pipeline,
             output_ref.desc().dims(),
             &[RenderShaderArgument {
-                shader_views: Some(shader.named_views(
+                shader_views: Some(pipeline.named_views(
                     registry,
                     &[],
                     &[("output_tex", uav::texture_2d(output_ref))],
@@ -42,18 +41,18 @@ fn synth_gradients(rg: &mut rg::RenderGraph, desc: rg::TextureDesc) -> rg::Handl
     output
 }
 
-fn blur(rg: &mut rg::RenderGraph, input: &rg::Handle<rg::Texture>) -> rg::Handle<rg::Texture> {
+fn blur(rg: &mut RenderGraph, input: &Handle<Texture>) -> Handle<Texture> {
     let mut pass = rg.add_pass();
     let input_ref = pass.read(input);
     let (output, output_ref) = pass.create(input.desc());
 
     pass.render(move |cb, registry| {
-        let shader = registry.shader("/assets/shaders/blur.hlsl", RenderShaderType::Compute)?;
+        let pipeline = registry.compute_pipeline("/assets/shaders/blur.hlsl")?;
         cb.rg_dispatch_2d(
-            &shader,
+            &pipeline,
             input_ref.desc().dims(),
             &[RenderShaderArgument {
-                shader_views: Some(shader.named_views(
+                shader_views: Some(pipeline.named_views(
                     registry,
                     &[("input_tex", srv::texture_2d(input_ref))],
                     &[("output_tex", uav::texture_2d(output_ref))],
@@ -67,21 +66,17 @@ fn blur(rg: &mut rg::RenderGraph, input: &rg::Handle<rg::Texture>) -> rg::Handle
     output
 }
 
-fn into_ycbcr(
-    rg: &mut rg::RenderGraph,
-    mut input: rg::Handle<rg::Texture>,
-) -> rg::Handle<rg::Texture> {
+fn into_ycbcr(rg: &mut RenderGraph, mut input: Handle<Texture>) -> Handle<Texture> {
     let mut pass = rg.add_pass();
     let input_ref = pass.write(&mut input);
 
     pass.render(move |cb, registry| {
-        let shader =
-            registry.shader("/assets/shaders/into_ycbcr.hlsl", RenderShaderType::Compute)?;
+        let pipeline = registry.compute_pipeline("/assets/shaders/into_ycbcr.hlsl")?;
         cb.rg_dispatch_2d(
-            &shader,
+            &pipeline,
             input_ref.desc().dims(),
             &[RenderShaderArgument {
-                shader_views: Some(shader.named_views(
+                shader_views: Some(pipeline.named_views(
                     registry,
                     &[],
                     &[("input_tex", uav::texture_2d(input_ref))],

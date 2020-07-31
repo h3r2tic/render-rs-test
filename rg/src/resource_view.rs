@@ -1,4 +1,4 @@
-use crate::{resource_registry::ResourceRegistry, shader_cache::ShaderCacheEntry};
+use crate::{pipeline::ComputePipeline, resource_registry::ResourceRegistry};
 use render_core::{handles::*, state::build, types::*};
 use std::sync::Arc;
 
@@ -41,7 +41,7 @@ pub trait NamedShaderViews {
     ) -> RenderResourceHandle;
 }
 
-impl NamedShaderViews for Arc<ShaderCacheEntry> {
+impl NamedShaderViews for Arc<ComputePipeline> {
     fn named_views(
         &self,
         registry: &ResourceRegistry,

@@ -1,16 +1,16 @@
-use crate::{graph::RenderGraphExecutionParams, resource::*, shader_cache::*};
+use crate::{graph::RenderGraphExecutionParams, pipeline::ComputePipeline, resource::*};
 
 use render_core::types::*;
 use std::{path::Path, sync::Arc};
 
-pub struct ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc> {
+pub struct ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc> {
     pub execution_params:
-        &'exec_params RenderGraphExecutionParams<'device, 'shader_cache, 'res_alloc>,
+        &'exec_params RenderGraphExecutionParams<'device, 'pipeline_cache, 'res_alloc>,
     pub(crate) resources: Vec<RenderResourceHandle>,
 }
 
-impl<'exec_params, 'device, 'shader_cache, 'res_alloc>
-    ResourceRegistry<'exec_params, 'device, 'shader_cache, 'res_alloc>
+impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
+    ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
 {
     pub fn get<T: Resource, GpuResType>(&self, resource: Ref<T, GpuResType>) -> GpuResType
     where
@@ -22,15 +22,12 @@ impl<'exec_params, 'device, 'shader_cache, 'res_alloc>
         )
     }
 
-    pub fn shader(
+    pub fn compute_pipeline(
         &self,
         shader_path: impl AsRef<Path>,
-        shader_type: RenderShaderType,
-    ) -> anyhow::Result<Arc<ShaderCacheEntry>> {
-        self.execution_params.shader_cache.get_or_load(
-            self.execution_params,
-            shader_type,
-            shader_path.as_ref(),
-        )
+    ) -> anyhow::Result<Arc<ComputePipeline>> {
+        self.execution_params
+            .pipeline_cache
+            .get_or_load_compute(self.execution_params, shader_path.as_ref())
     }
 }

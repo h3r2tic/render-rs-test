@@ -1,4 +1,4 @@
-use render_core::{state::RenderComputePipelineStateDesc, types::*};
+use render_core::types::*;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -50,6 +50,7 @@ impl TurboslothShaderCache {
         let shader_handle = params
             .handles
             .allocate_persistent(RenderResourceType::Shader);
+
         params.device.create_shader(
             shader_handle,
             &RenderShaderDesc {
@@ -59,44 +60,23 @@ impl TurboslothShaderCache {
             "compute shader".into(),
         )?;
 
-        let pipeline_handle = params
-            .handles
-            .allocate_persistent(RenderResourceType::ComputePipelineState);
-
-        params.device.create_compute_pipeline_state(
-            pipeline_handle,
-            &RenderComputePipelineStateDesc {
-                shader: shader_handle,
-                shader_signature: RenderShaderSignatureDesc::new(
-                    &[RenderShaderParameter::new(
-                        shader_data.srvs.len() as u32,
-                        shader_data.uavs.len() as u32,
-                    )],
-                    &[],
-                ),
-            },
-            "gradients compute pipeline".into(),
-        )?;
-
         Ok(TurboslothShaderCacheEntry {
             lazy_handle: lazy_shader,
             entry: Arc::new(rg::shader_cache::ShaderCacheEntry {
                 shader_handle,
-                pipeline_handle,
                 srvs: shader_data.srvs.clone(),
                 uavs: shader_data.uavs.clone(),
                 group_size: shader_data.group_size,
             }),
         })
     }
-}
 
-impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
-    fn get_or_load(
+    fn get_or_load_impl(
         &self,
         params: &rg::RenderGraphExecutionParams<'_, '_, '_>,
         shader_type: RenderShaderType,
         path: &Path,
+        retired: &mut Option<Arc<rg::shader_cache::ShaderCacheEntry>>,
     ) -> anyhow::Result<Arc<rg::shader_cache::ShaderCacheEntry>> {
         let key = ShaderCacheKey {
             path: path.to_owned(),
@@ -110,7 +90,7 @@ impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
             if entry.lazy_handle.is_up_to_date() {
                 return Ok(entry.entry.clone());
             } else {
-                shaders.remove(&key);
+                *retired = shaders.remove(&key).map(|entry| entry.entry);
             }
         }
 
@@ -118,5 +98,18 @@ impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
         let result = new_entry.entry.clone();
         shaders.insert(key, new_entry);
         Ok(result)
+    }
+}
+
+impl rg::shader_cache::ShaderCache for TurboslothShaderCache {
+    fn get_or_load(
+        &self,
+        params: &rg::RenderGraphExecutionParams<'_, '_, '_>,
+        shader_type: RenderShaderType,
+        path: &Path,
+    ) -> rg::shader_cache::ShaderCacheOutput {
+        let mut retired = None;
+        let entry = self.get_or_load_impl(params, shader_type, path, &mut retired);
+        rg::shader_cache::ShaderCacheOutput { entry, retired }
     }
 }

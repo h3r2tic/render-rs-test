@@ -30,5 +30,5 @@ byte-slice-cast = "0.3.5"
 anyhow = "1.0"
 rspirv = { git = "https://github.com/Traverse-Research/rspirv.git" }
 
-#[patch.crates-io]
-#turbosloth = { path = "../turbosloth" }
+[patch.crates-io]
+turbosloth = { path = "../turbosloth" }

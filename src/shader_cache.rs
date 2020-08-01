@@ -13,7 +13,7 @@ struct ShaderCacheKey {
 }
 
 struct TurboslothShaderCacheEntry {
-    lazy_handle: Lazy<crate::shader_compiler::ComputeShader>,
+    lazy_handle: OpaqueLazy,
     entry: Arc<rg::shader_cache::ShaderCacheEntry>,
 }
 
@@ -40,35 +40,77 @@ impl TurboslothShaderCache {
     ) -> anyhow::Result<TurboslothShaderCacheEntry> {
         let path = path;
 
-        let lazy_shader = crate::shader_compiler::CompileComputeShader {
-            path: path.to_owned(),
+        match shader_type {
+            RenderShaderType::Vertex
+            | RenderShaderType::Geometry
+            | RenderShaderType::Hull
+            | RenderShaderType::Domain
+            | RenderShaderType::Pixel => {
+                let lazy_shader = crate::shader_compiler::CompileRasterShader {
+                    path: path.to_owned(),
+                    stage: shader_type,
+                }
+                .into_lazy();
+
+                let shader_data = smol::block_on(lazy_shader.eval(&self.lazy_cache))?;
+
+                let shader_handle = params
+                    .handles
+                    .allocate_persistent(RenderResourceType::Shader);
+
+                params.device.create_shader(
+                    shader_handle,
+                    &RenderShaderDesc {
+                        shader_type,
+                        shader_data: shader_data.spirv.clone(),
+                    },
+                    "raster shader".into(),
+                )?;
+
+                Ok(TurboslothShaderCacheEntry {
+                    lazy_handle: lazy_shader.into_opaque(),
+                    entry: Arc::new(rg::shader_cache::ShaderCacheEntry::Raster(
+                        rg::shader_cache::RasterShaderCacheEntry {
+                            shader_handle,
+                            stage: shader_type,
+                        },
+                    )),
+                })
+            }
+            RenderShaderType::Compute => {
+                let lazy_shader = crate::shader_compiler::CompileComputeShader {
+                    path: path.to_owned(),
+                }
+                .into_lazy();
+
+                let shader_data = smol::block_on(lazy_shader.eval(&self.lazy_cache))?;
+
+                let shader_handle = params
+                    .handles
+                    .allocate_persistent(RenderResourceType::Shader);
+
+                params.device.create_shader(
+                    shader_handle,
+                    &RenderShaderDesc {
+                        shader_type,
+                        shader_data: shader_data.spirv.clone(),
+                    },
+                    "compute shader".into(),
+                )?;
+
+                Ok(TurboslothShaderCacheEntry {
+                    lazy_handle: lazy_shader.into_opaque(),
+                    entry: Arc::new(rg::shader_cache::ShaderCacheEntry::Compute(
+                        rg::shader_cache::ComputeShaderCacheEntry {
+                            shader_handle,
+                            srvs: shader_data.srvs.clone(),
+                            uavs: shader_data.uavs.clone(),
+                            group_size: shader_data.group_size,
+                        },
+                    )),
+                })
+            }
         }
-        .into_lazy();
-
-        let shader_data = smol::block_on(lazy_shader.eval(&self.lazy_cache))?;
-
-        let shader_handle = params
-            .handles
-            .allocate_persistent(RenderResourceType::Shader);
-
-        params.device.create_shader(
-            shader_handle,
-            &RenderShaderDesc {
-                shader_type,
-                shader_data: shader_data.spirv.clone(),
-            },
-            "compute shader".into(),
-        )?;
-
-        Ok(TurboslothShaderCacheEntry {
-            lazy_handle: lazy_shader,
-            entry: Arc::new(rg::shader_cache::ShaderCacheEntry {
-                shader_handle,
-                srvs: shader_data.srvs.clone(),
-                uavs: shader_data.uavs.clone(),
-                group_size: shader_data.group_size,
-            }),
-        })
     }
 
     fn get_or_load_impl(

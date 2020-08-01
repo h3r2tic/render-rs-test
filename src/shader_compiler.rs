@@ -3,6 +3,7 @@
 use anyhow::{anyhow, bail, Result};
 use byte_slice_cast::IntoByteVec;
 use relative_path::{RelativePath, RelativePathBuf};
+use render_core::types::RenderShaderType;
 use shader_prepper;
 use std::{
     collections::{HashMap, HashSet},
@@ -110,6 +111,89 @@ fn compile_cs_hlsl_impl(
         spirv: spirv.into_byte_vec(),
         srvs,
         uavs,
+    })
+}
+
+#[derive(Clone, Hash)]
+pub struct CompileRasterShader {
+    pub path: PathBuf,
+    pub stage: RenderShaderType,
+}
+
+#[async_trait]
+impl LazyWorker for CompileRasterShader {
+    type Output = Result<RasterShader>;
+
+    async fn run(self, ctx: RunContext) -> Self::Output {
+        let file_path = self.path.to_str().unwrap().to_owned();
+        let source = shader_prepper::process_file(
+            &file_path,
+            &mut ShaderIncludeProvider { ctx: ctx.clone() },
+            String::new(),
+        );
+        let source = source.map_err(|err| anyhow!("{}", err))?;
+
+        let ext = self
+            .path
+            .extension()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or("".to_string());
+
+        let name = self
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or("unknown".to_string());
+
+        match ext.as_str() {
+            "glsl" => unimplemented!(),
+            "hlsl" => compile_raster_shader_hlsl_impl(name, self.stage, &source),
+            _ => anyhow::bail!("Unrecognized shader file extension: {}", ext),
+        }
+    }
+}
+
+pub struct RasterShader {
+    pub name: String,
+    pub stage: RenderShaderType,
+    pub spirv: Vec<u8>,
+}
+
+fn compile_raster_shader_hlsl_impl(
+    name: String,
+    stage: RenderShaderType,
+    source: &[shader_prepper::SourceChunk],
+) -> Result<RasterShader> {
+    let mut source_text = String::new();
+    for s in source {
+        source_text += &s.source;
+    }
+
+    let target_profile = match stage {
+        RenderShaderType::Vertex => "vs_6_4",
+        RenderShaderType::Geometry => "gs_6_4",
+        RenderShaderType::Hull => "hs_6_4",
+        RenderShaderType::Domain => "ds_6_4",
+        RenderShaderType::Pixel => "ps_6_4",
+        RenderShaderType::Compute => unreachable!(),
+    };
+
+    let t0 = std::time::Instant::now();
+    let spirv = hassle_rs::compile_hlsl(
+        &name,
+        &source_text,
+        "main",
+        target_profile,
+        &["-spirv"],
+        &[],
+    )
+    .map_err(|err| anyhow!("{}", err))?;
+    println!("dxc took {:?}", t0.elapsed());
+
+    Ok(RasterShader {
+        name,
+        stage,
+        spirv: spirv.into_byte_vec(),
     })
 }
 

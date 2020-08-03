@@ -1,6 +1,6 @@
 use render_core::{
     state::{RenderDrawState, RenderScissorRect, RenderViewportRect},
-    types::{RenderDrawPacket, RenderResourceStates},
+    types::RenderDrawPacket,
 };
 use rg::{command_ext::*, resource_view::*, *};
 
@@ -32,11 +32,7 @@ fn raster_triangle(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
             pixel_shader: "/assets/shaders/raster_simple_ps.hlsl".into(),
         })?;
 
-        let rt = registry.get(output_ref);
-
-        let rt_handle = rt.0;
-        cb.transitions(&[(rt_handle, RenderResourceStates::RENDER_TARGET)])?;
-        cb.begin_render_pass(registry.render_pass(&[rt])?)?;
+        cb.begin_render_pass(registry.render_pass(&[output_ref])?)?;
 
         // TODO
         let width = 1280;
@@ -76,7 +72,6 @@ fn raster_triangle(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
             },
         )?;
         cb.end_render_pass()?;
-        cb.transitions(&[(rt_handle, RenderResourceStates::NON_PIXEL_SHADER_RESOURCE)])?;
 
         Ok(())
     });

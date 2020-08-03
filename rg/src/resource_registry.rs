@@ -39,7 +39,7 @@ impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
             .get_or_load_compute(self.execution_params, shader_path.as_ref())
     }
 
-    pub fn render_pass(&self, rts: &[GpuRt]) -> anyhow::Result<RenderResourceHandle> {
+    pub fn render_pass(&self, rts: &[Ref<Texture, GpuRt>]) -> anyhow::Result<RenderResourceHandle> {
         let device = self.execution_params.device;
 
         let frame_binding_set_handle = self
@@ -51,7 +51,7 @@ impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
         for (i, rt) in rts.iter().enumerate() {
             render_target_views[i] = Some(RenderBindingRenderTargetView {
                 base: RenderBindingView {
-                    resource: rt.0,
+                    resource: self.resources[rt.handle.id as usize],
                     format: RenderFormat::R32g32b32a32Float, // TODO
                     dimension: RenderViewDimension::Tex2d,
                 },

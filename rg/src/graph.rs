@@ -213,13 +213,20 @@ impl RenderGraph {
             resources: gpu_resources,
         };
 
+        let mut transitions = Vec::new();
+
         for pass in self.passes.into_iter() {
-            // TODO: partial barrier cmds (destination access modes)
+            transitions.clear();
+            for resource_ref in pass.read.iter().chain(pass.write.iter()) {
+                transitions.push((
+                    resource_registry.resources[resource_ref.handle.id as usize],
+                    resource_ref.access_mode,
+                ));
+            }
+            cb.transitions(&transitions)?;
+
             (pass.render_fn.unwrap())(cb, &resource_registry)?;
         }
-
-        // TODO: perform transitions
-        //todo!("run the recorded commands");
 
         let output_texture = resource_registry.resources[get_output_texture.raw.id as usize];
         assert!(output_texture.get_type() == RenderResourceType::Texture);

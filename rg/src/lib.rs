@@ -11,5 +11,6 @@ mod resource_registry;
 
 pub use graph::*;
 pub use pass_builder::PassBuilder;
+pub use pipeline::*;
 pub use resource::*;
 pub use resource_registry::ResourceRegistry;

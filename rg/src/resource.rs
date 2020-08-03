@@ -118,6 +118,7 @@ where
 #[derive(Clone, Copy)]
 pub struct GpuSrv(pub RenderResourceHandle);
 pub struct GpuUav(pub RenderResourceHandle);
+pub struct GpuRt(pub RenderResourceHandle);
 
 pub trait ToGpuResourceView {
     fn to_gpu_resource_view(res: RenderResourceHandle) -> Self;
@@ -130,6 +131,12 @@ impl ToGpuResourceView for GpuSrv {
 }
 
 impl ToGpuResourceView for GpuUav {
+    fn to_gpu_resource_view(res: RenderResourceHandle) -> Self {
+        Self(res)
+    }
+}
+
+impl ToGpuResourceView for GpuRt {
     fn to_gpu_resource_view(res: RenderResourceHandle) -> Self {
         Self(res)
     }

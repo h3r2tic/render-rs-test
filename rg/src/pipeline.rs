@@ -2,14 +2,14 @@ use render_core::handles::RenderResourceHandle;
 use std::path::PathBuf;
 
 pub struct ComputePipeline {
-    pub(crate) handle: RenderResourceHandle,
-    pub(crate) group_size: [u32; 3],
-    pub(crate) srvs: Vec<String>,
-    pub(crate) uavs: Vec<String>,
+    pub handle: RenderResourceHandle,
+    pub group_size: [u32; 3],
+    pub srvs: Vec<String>,
+    pub uavs: Vec<String>,
 }
 
 pub struct RasterPipeline {
-    pub(crate) handle: RenderResourceHandle,
+    pub handle: RenderResourceHandle,
 }
 
 #[derive(Hash, Eq, PartialEq)]

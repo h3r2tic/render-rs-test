@@ -2,9 +2,10 @@ use crate::{
     graph::{GraphResourceCreateInfo, RecordedPass, RenderGraph},
     resource::*,
     resource_registry::ResourceRegistry,
+    PassResourceRef,
 };
 
-use render_core::encoder::RenderCommandList;
+use render_core::{encoder::RenderCommandList, types::RenderResourceStates};
 use std::marker::PhantomData;
 
 pub struct PassBuilder<'rg> {
@@ -35,10 +36,7 @@ impl<'rg> PassBuilder<'rg> {
     pub fn create<Desc: ResourceDesc>(
         &mut self,
         desc: &Desc,
-    ) -> (
-        Handle<<Desc as ResourceDesc>::Resource>,
-        Ref<<Desc as ResourceDesc>::Resource, GpuUav>,
-    )
+    ) -> Handle<<Desc as ResourceDesc>::Resource>
     where
         Desc: TypeEquals<Other = <<Desc as ResourceDesc>::Resource as Resource>::Desc>,
     {
@@ -51,31 +49,30 @@ impl<'rg> PassBuilder<'rg> {
             marker: PhantomData,
         };
 
-        self.pass.as_mut().unwrap().write.push(handle.raw);
-
-        let reference = Ref {
-            desc: TypeEquals::same(desc.clone()),
-            handle: handle.raw,
-            marker: PhantomData,
-        };
-
-        (handle, reference)
+        handle
     }
 
-    pub fn write<Res: Resource>(&mut self, handle: &mut Handle<Res>) -> Ref<Res, GpuUav> {
+    pub fn write_impl<Res: Resource, AccessMode>(
+        &mut self,
+        handle: &mut Handle<Res>,
+        access_mode: RenderResourceStates,
+    ) -> Ref<Res, AccessMode> {
         let pass = self.pass.as_mut().unwrap();
 
         // Don't know of a good way to use the borrow checker to verify that writes and reads
         // don't overlap, and that multiple writes don't happen to the same resource.
         // The borrow checker will at least check that resources don't alias each other,
         // but for the access in render passes, we resort to a runtime check.
-        if pass.write.contains(&handle.raw) {
+        if pass.write.iter().any(|item| item.handle == handle.raw) {
             panic!("Trying to write twice to the same resource within one render pass");
-        } else if pass.read.contains(&handle.raw) {
+        } else if pass.read.iter().any(|item| item.handle == handle.raw) {
             panic!("Trying to read and write to the same resource within one render pass");
         }
 
-        pass.write.push(handle.raw);
+        pass.write.push(PassResourceRef {
+            handle: handle.raw,
+            access_mode,
+        });
 
         Ref {
             desc: handle.desc.clone(),
@@ -84,15 +81,27 @@ impl<'rg> PassBuilder<'rg> {
         }
     }
 
+    pub fn write<Res: Resource>(&mut self, handle: &mut Handle<Res>) -> Ref<Res, GpuUav> {
+        self.write_impl(handle, RenderResourceStates::UNORDERED_ACCESS)
+    }
+
+    pub fn raster<Res: Resource>(&mut self, handle: &mut Handle<Res>) -> Ref<Res, GpuRt> {
+        self.write_impl(handle, RenderResourceStates::RENDER_TARGET)
+    }
+
     pub fn read<Res: Resource>(&mut self, handle: &Handle<Res>) -> Ref<Res, GpuSrv> {
         let pass = self.pass.as_mut().unwrap();
 
         // Runtime "borrow" check; see info in `write` above.
-        if pass.write.contains(&handle.raw) {
+        if pass.write.iter().any(|item| item.handle == handle.raw) {
             panic!("Trying to read and write to the same resource within one render pass");
         }
 
-        pass.read.push(handle.raw);
+        pass.write.push(PassResourceRef {
+            handle: handle.raw,
+            access_mode: RenderResourceStates::PIXEL_SHADER_RESOURCE
+                | RenderResourceStates::NON_PIXEL_SHADER_RESOURCE,
+        });
 
         Ref {
             desc: handle.desc.clone(),

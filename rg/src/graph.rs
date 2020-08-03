@@ -148,7 +148,7 @@ impl RenderGraph {
 
         for (pass_idx, pass) in self.passes.iter().enumerate() {
             for res_access in pass.read.iter().chain(pass.write.iter()) {
-                let res = &mut resource_lifetimes[res_access.id as usize];
+                let res = &mut resource_lifetimes[res_access.handle.id as usize];
                 res.last_access = res.last_access.max(pass_idx);
             }
         }
@@ -189,7 +189,8 @@ impl RenderGraph {
                             &RenderTextureDesc {
                                 texture_type: RenderTextureType::Tex2d,
                                 bind_flags: RenderBindFlags::UNORDERED_ACCESS
-                                    | RenderBindFlags::SHADER_RESOURCE,
+                                    | RenderBindFlags::SHADER_RESOURCE
+                                    | RenderBindFlags::RENDER_TARGET,
                                 format: RenderFormat::R32g32b32a32Float,
                                 width: desc.width,
                                 height: desc.height,
@@ -233,9 +234,14 @@ impl RenderGraph {
 
 type DynRenderFn = dyn FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> anyhow::Result<()>;
 
+pub(crate) struct PassResourceRef {
+    pub handle: GraphRawResourceHandle,
+    pub access_mode: RenderResourceStates,
+}
+
 #[derive(Default)]
 pub(crate) struct RecordedPass {
-    pub read: Vec<GraphRawResourceHandle>,
-    pub write: Vec<GraphRawResourceHandle>,
+    pub read: Vec<PassResourceRef>,
+    pub write: Vec<PassResourceRef>,
     pub render_fn: Option<Box<DynRenderFn>>,
 }

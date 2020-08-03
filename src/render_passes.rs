@@ -1,85 +1,65 @@
 use render_core::{
-    state::{RenderDrawState, RenderScissorRect, RenderViewportRect},
-    types::RenderDrawPacket,
+    state::RenderState,
+    types::{RenderDrawPacket, RenderFormat, RenderTargetInfo},
 };
 use rg::{command_ext::*, resource_view::*, *};
 
 pub fn render_frame_rg() -> (RenderGraph, Handle<Texture>) {
     let mut rg = RenderGraph::new();
 
-    let tex = /*synth_gradients*/raster_triangle(
+    let mut tex = synth_gradients(
         &mut rg,
         TextureDesc {
             width: 1280,
             height: 720,
+            format: RenderFormat::R16g16b16a16Float,
         },
     );
+    raster_triangle(&mut rg, &mut tex);
 
     let tex = blur(&mut rg, &tex);
-    //let tex = into_ycbcr(&mut rg, tex);
+    let tex = into_ycbcr(&mut rg, tex);
 
     (rg, tex)
 }
 
-fn raster_triangle(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
+fn raster_triangle(rg: &mut RenderGraph, output: &mut Handle<Texture>) {
     let mut pass = rg.add_pass();
-    let mut output = pass.create(&desc);
-    let output_ref = pass.raster(&mut output);
+    let output_ref = pass.raster(output);
 
     pass.render(move |cb, registry| {
-        let pipeline = registry.raster_pipeline(RasterPipelineDesc {
-            vertex_shader: "/assets/shaders/raster_simple_vs.hlsl".into(),
-            pixel_shader: "/assets/shaders/raster_simple_ps.hlsl".into(),
-        })?;
+        let render_target = RenderTarget::new([(output_ref, RenderTargetInfo::default())]);
 
-        cb.begin_render_pass(registry.render_pass(&[output_ref])?)?;
+        let pipeline = registry.raster_pipeline(
+            RasterPipelineDesc {
+                vertex_shader: "/assets/shaders/raster_simple_vs.hlsl".into(),
+                pixel_shader: "/assets/shaders/raster_simple_ps.hlsl".into(),
+                render_state: RenderState {
+                    depth_enable: false,
+                    ..Default::default()
+                },
+            },
+            &render_target,
+        )?;
 
-        // TODO
-        let width = 1280;
-        let height = 720;
-
+        cb.begin_render_pass(registry.render_pass(&render_target)?)?;
         cb.draw(
             pipeline.handle,
-            &[RenderShaderArgument {
-                shader_views: None,
-                constant_buffer: None,
-                constant_buffer_offset: 0,
-            }],
+            &[RenderShaderArgument::default()],
             None,
-            &RenderDrawState {
-                viewport: Some(RenderViewportRect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: width as f32,
-                    height: height as f32,
-                    min_z: 0.0,
-                    max_z: 1.0,
-                }),
-                scissor: Some(RenderScissorRect {
-                    x: 0,
-                    y: 0,
-                    width,
-                    height,
-                }),
-                stencil_ref: 0,
-            },
+            &render_target.to_draw_state(),
             &RenderDrawPacket {
-                index_offset: 0,
-                vertex_offset: 0,
                 vertex_count: 3,
-                first_instance: 0,
-                instance_count: 1,
+                ..Default::default()
             },
         )?;
         cb.end_render_pass()?;
 
         Ok(())
     });
-
-    output
 }
 
-/*fn synth_gradients(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
+fn synth_gradients(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
     let mut pass = rg.add_pass();
     let mut output = pass.create(&desc);
     let output_ref = pass.write(&mut output);
@@ -102,7 +82,7 @@ fn raster_triangle(rg: &mut RenderGraph, desc: TextureDesc) -> Handle<Texture> {
     });
 
     output
-}*/
+}
 
 fn blur(rg: &mut RenderGraph, input: &Handle<Texture>) -> Handle<Texture> {
     let mut pass = rg.add_pass();

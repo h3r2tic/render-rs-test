@@ -1,4 +1,4 @@
-use render_core::handles::RenderResourceHandle;
+use render_core::{handles::RenderResourceHandle, state::RenderState};
 use std::path::PathBuf;
 
 pub struct ComputePipeline {
@@ -12,8 +12,8 @@ pub struct RasterPipeline {
     pub handle: RenderResourceHandle,
 }
 
-#[derive(Hash, Eq, PartialEq)]
 pub struct RasterPipelineDesc {
     pub vertex_shader: PathBuf,
     pub pixel_shader: PathBuf,
+    pub render_state: RenderState,
 }

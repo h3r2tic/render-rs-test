@@ -2,6 +2,7 @@ use crate::{
     graph::RenderGraphExecutionParams,
     pipeline::{ComputePipeline, RasterPipeline, RasterPipelineDesc},
     resource::*,
+    RenderTarget,
 };
 
 use render_core::{
@@ -20,7 +21,7 @@ pub struct ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc> 
 impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
     ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
 {
-    pub fn get<T: Resource, GpuResType>(&self, resource: Ref<T, GpuResType>) -> GpuResType
+    pub fn resource<T: Resource, GpuResType>(&self, resource: Ref<T, GpuResType>) -> GpuResType
     where
         GpuResType: ToGpuResourceView,
     {
@@ -39,7 +40,10 @@ impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
             .get_or_load_compute(self.execution_params, shader_path.as_ref())
     }
 
-    pub fn render_pass(&self, rts: &[Ref<Texture, GpuRt>]) -> anyhow::Result<RenderResourceHandle> {
+    pub fn render_pass(
+        &self,
+        render_target: &RenderTarget,
+    ) -> anyhow::Result<RenderResourceHandle> {
         let device = self.execution_params.device;
 
         let frame_binding_set_handle = self
@@ -48,19 +52,21 @@ impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
             .allocate_transient(RenderResourceType::FrameBindingSet);
 
         let mut render_target_views = [None; MAX_RENDER_TARGET_COUNT];
-        for (i, rt) in rts.iter().enumerate() {
-            render_target_views[i] = Some(RenderBindingRenderTargetView {
-                base: RenderBindingView {
-                    resource: self.resources[rt.handle.id as usize],
-                    format: RenderFormat::R32g32b32a32Float, // TODO
-                    dimension: RenderViewDimension::Tex2d,
-                },
-                mip_slice: 0,
-                first_array_slice: 0,
-                plane_slice_first_w_slice: 0,
-                array_size: 0,
-                w_size: 0,
-            });
+        for (i, rt) in render_target.color.iter().enumerate() {
+            if let Some(rt) = rt {
+                render_target_views[i] = Some(RenderBindingRenderTargetView {
+                    base: RenderBindingView {
+                        resource: self.resources[rt.texture.handle.id as usize],
+                        format: rt.texture.desc().format,
+                        dimension: RenderViewDimension::Tex2d,
+                    },
+                    mip_slice: 0,
+                    first_array_slice: 0,
+                    plane_slice_first_w_slice: 0,
+                    array_size: 0,
+                    w_size: 0,
+                });
+            }
         }
 
         device.create_frame_binding_set(
@@ -100,9 +106,15 @@ impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
         Ok(render_pass_handle)
     }
 
-    pub fn raster_pipeline(&self, desc: RasterPipelineDesc) -> anyhow::Result<Arc<RasterPipeline>> {
-        self.execution_params
-            .pipeline_cache
-            .get_or_load_raster(self.execution_params, desc)
+    pub fn raster_pipeline(
+        &self,
+        desc: RasterPipelineDesc,
+        render_target: &RenderTarget,
+    ) -> anyhow::Result<Arc<RasterPipeline>> {
+        self.execution_params.pipeline_cache.get_or_load_raster(
+            self.execution_params,
+            desc,
+            render_target,
+        )
     }
 }

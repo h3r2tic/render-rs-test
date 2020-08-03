@@ -1,7 +1,10 @@
 use crate::pipeline::ComputePipeline;
 use render_core::encoder::RenderCommandList;
 
-pub use render_core::types::{RenderShaderArgument, RenderShaderType};
+pub use render_core::{
+    state::{RenderDrawState, RenderScissorRect, RenderViewportRect},
+    types::{RenderShaderArgument, RenderShaderType},
+};
 use std::sync::Arc;
 
 pub trait RgRenderCommandListExtension {

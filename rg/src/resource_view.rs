@@ -62,8 +62,8 @@ impl NamedShaderViews for Arc<ComputePipeline> {
 
             // TODO: other binding types
             resource_views.shader_resource_views[binding_idx] = build::texture_2d(
-                registry.get(srv.rg_ref.internal_clone()).0,
-                RenderFormat::R32g32b32a32Float,
+                registry.resource(srv.rg_ref.internal_clone()).0,
+                srv.rg_ref.desc().format,
                 0,
                 1,
                 0,
@@ -80,8 +80,8 @@ impl NamedShaderViews for Arc<ComputePipeline> {
 
             // TODO: other binding types
             resource_views.unordered_access_views[binding_idx] = build::texture_2d_rw(
-                registry.get(uav.rg_ref.internal_clone()).0,
-                RenderFormat::R32g32b32a32Float,
+                registry.resource(uav.rg_ref.internal_clone()).0,
+                uav.rg_ref.desc().format,
                 0,
                 0,
             );

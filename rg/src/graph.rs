@@ -163,7 +163,8 @@ impl RenderGraph {
         // TODO: use exported/imported resources instead
         get_output_texture: Handle<Texture>,
     ) -> anyhow::Result<RenderGraphExecutionOutput> {
-        let resource_lifetimes = self.calculate_resource_lifetimes();
+        let _resource_lifetimes = self.calculate_resource_lifetimes();
+        // TODO: alias resources
 
         /* println!(
             "Resources: {:#?}",
@@ -191,7 +192,7 @@ impl RenderGraph {
                                 bind_flags: RenderBindFlags::UNORDERED_ACCESS
                                     | RenderBindFlags::SHADER_RESOURCE
                                     | RenderBindFlags::RENDER_TARGET,
-                                format: RenderFormat::R32g32b32a32Float,
+                                format: desc.format,
                                 width: desc.width,
                                 height: desc.height,
                                 depth: 1,

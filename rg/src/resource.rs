@@ -1,4 +1,4 @@
-use render_core::handles::*;
+use render_core::{handles::*, types::RenderFormat};
 use std::marker::PhantomData;
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
@@ -20,6 +20,7 @@ pub trait ResourceDesc: Clone + std::fmt::Debug + Into<crate::graph::GraphResour
 pub struct TextureDesc {
     pub width: u32,
     pub height: u32,
+    pub format: RenderFormat,
 }
 
 impl ResourceDesc for TextureDesc {

@@ -1,7 +1,7 @@
 use crate::{
     pipeline::{ComputePipeline, RasterPipeline},
     shader_cache::{ShaderCache, ShaderCacheEntry},
-    RasterPipelineDesc, RenderGraphExecutionParams,
+    RasterPipelineDesc, RenderGraphExecutionParams, RenderTarget,
 };
 use render_core::{
     constants::{MAX_RENDER_TARGET_COUNT, MAX_SHADER_TYPE},
@@ -22,6 +22,7 @@ use std::{
 struct RasterPipelineKey {
     vertex_shader: RenderResourceHandle,
     pixel_shader: RenderResourceHandle,
+    render_state_hash: u64,
 }
 
 impl RasterPipelineKey {
@@ -136,6 +137,7 @@ impl PipelineCache {
         &self,
         params: &RenderGraphExecutionParams<'_, '_, '_>,
         desc: RasterPipelineDesc,
+        render_target: &RenderTarget,
     ) -> anyhow::Result<Arc<RasterPipeline>> {
         let vertex_shader =
             self.shader_cache
@@ -200,9 +202,13 @@ impl PipelineCache {
         let vertex_shader = vertex_shader.entry?.shader_handle();
         let pixel_shader = pixel_shader.entry?.shader_handle();
 
+        let render_state_blob = bincode::serialize(&desc.render_state).unwrap();
+        let render_state_hash = wyhash::wyhash(&render_state_blob, 0);
+
         let pipeline_key = RasterPipelineKey {
             vertex_shader,
             pixel_shader,
+            render_state_hash,
         };
 
         if let Some(key) = pipelines
@@ -212,6 +218,8 @@ impl PipelineCache {
             return Ok(pipelines.raster_pipelines[&key].pipeline.clone());
         }
 
+        println!("Creating a new raster pipeline");
+
         let pipeline_handle = params
             .handles
             .allocate_persistent(RenderResourceType::GraphicsPipelineState);
@@ -220,8 +228,15 @@ impl PipelineCache {
         shaders[RenderShaderType::Vertex as usize] = vertex_shader;
         shaders[RenderShaderType::Pixel as usize] = pixel_shader;
 
+        let mut render_target_count = 0;
         let mut render_target_formats = [RenderFormat::Unknown; MAX_RENDER_TARGET_COUNT];
-        render_target_formats[0] = RenderFormat::R32g32b32a32Float; // TODO
+
+        for (i, color) in render_target.color.iter().enumerate() {
+            if let Some(color) = color {
+                render_target_formats[i] = color.texture.desc().format;
+                render_target_count += 1;
+            }
+        }
 
         params.device.create_graphics_pipeline_state(
             pipeline_handle,
@@ -234,27 +249,15 @@ impl PipelineCache {
                     )],
                     &[],
                 ),
-                render_state: RenderState {
-                    blend_states: Default::default(),
-                    stencil: Default::default(),
-                    depth_enable: false, // TODO
-                    depth_clamp: false,
-                    depth_write_mask: 0xffffffff,
-                    depth_bias: 0.0,
-                    slope_scaled_depth_bias: 0.0,
-                    depth_func: RenderCompareFunc::GreaterEqual,
-                    fill_mode: RenderFillMode::Solid,
-                    cull_mode: RenderCullMode::None,
-                    anti_aliased_line_enabled: false,
-                },
+                render_state: desc.render_state,
                 vertex_element_count: 0,
                 vertex_elements: Default::default(),
                 vertex_buffer_strides: Default::default(),
                 primitive_type: RenderPrimitiveType::TriangleList, // TODO
-                render_target_count: 1,                            // TODO
+                render_target_count,
                 render_target_write_masks: Default::default(),
                 render_target_formats,
-                //depth_stencil_format: RenderFormat::D32Float,
+                //depth_stencil_format: RenderFormat::D32Float, // TODO
                 depth_stencil_format: RenderFormat::Unknown,
             },
             "raster pipeline".into(),

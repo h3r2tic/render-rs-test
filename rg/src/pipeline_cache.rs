@@ -22,6 +22,7 @@ use std::{
 struct RasterPipelineKey {
     vertex_shader: RenderResourceHandle,
     pixel_shader: RenderResourceHandle,
+    render_target_formats: [RenderFormat; MAX_RENDER_TARGET_COUNT],
     render_state_hash: u64,
 }
 
@@ -205,10 +206,21 @@ impl PipelineCache {
         let render_state_blob = bincode::serialize(&desc.render_state).unwrap();
         let render_state_hash = wyhash::wyhash(&render_state_blob, 0);
 
+        let mut render_target_count = 0;
+        let mut render_target_formats = [RenderFormat::Unknown; MAX_RENDER_TARGET_COUNT];
+
+        for (i, color) in render_target.color.iter().enumerate() {
+            if let Some(color) = color {
+                render_target_formats[i] = color.texture.desc().format;
+                render_target_count += 1;
+            }
+        }
+
         let pipeline_key = RasterPipelineKey {
             vertex_shader,
             pixel_shader,
             render_state_hash,
+            render_target_formats,
         };
 
         if let Some(key) = pipelines
@@ -227,16 +239,6 @@ impl PipelineCache {
         let mut shaders: [RenderResourceHandle; MAX_SHADER_TYPE] = Default::default();
         shaders[RenderShaderType::Vertex as usize] = vertex_shader;
         shaders[RenderShaderType::Pixel as usize] = pixel_shader;
-
-        let mut render_target_count = 0;
-        let mut render_target_formats = [RenderFormat::Unknown; MAX_RENDER_TARGET_COUNT];
-
-        for (i, color) in render_target.color.iter().enumerate() {
-            if let Some(color) = color {
-                render_target_formats[i] = color.texture.desc().format;
-                render_target_count += 1;
-            }
-        }
 
         params.device.create_graphics_pipeline_state(
             pipeline_handle,

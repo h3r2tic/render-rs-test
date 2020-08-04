@@ -1,15 +1,20 @@
 mod file;
+mod mesh;
 mod render_device;
 mod render_loop;
 mod render_passes;
 mod shader_cache;
 mod shader_compiler;
 
+use mesh::*;
 use render_core::{
     device::RenderDevice, handles::RenderResourceHandleAllocator, system::RenderSystem, types::*,
 };
 use render_device::create_render_device;
-use std::sync::{Arc, RwLock};
+use std::{
+    mem::size_of,
+    sync::{Arc, RwLock},
+};
 use turbosloth::*;
 
 pub trait HandleAllocator {
@@ -51,6 +56,20 @@ fn create_swap_chain(
     )?;
 
     Ok(swapchain)
+}
+
+pub fn into_byte_vec<T>(mut v: Vec<T>) -> Vec<u8>
+where
+    T: Copy,
+{
+    unsafe {
+        let p = v.as_mut_ptr();
+        let item_sizeof = std::mem::size_of::<T>();
+        let len = v.len() * item_sizeof;
+        let cap = v.capacity() * item_sizeof;
+        std::mem::forget(v);
+        Vec::from_raw_parts(p as *mut u8, len, cap)
+    }
 }
 
 fn try_main() -> std::result::Result<(), anyhow::Error> {
@@ -102,13 +121,47 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
     let mut render_loop = render_loop::RenderLoop::new(device.clone(), error_output_texture);
     let mut last_error_text = None;
 
+    let vertex_count = 3;
+    let mesh = TriangleMesh {
+        positions: (0..vertex_count)
+            .map(|i| {
+                let a = i as f32 * std::f32::consts::PI * 2.0 / (vertex_count as f32);
+                [a.cos() * 0.5, a.sin() * 0.5, 0.0]
+            })
+            .collect(),
+    };
+    let gpu_mesh = Arc::new(GpuTriangleMesh {
+        vertex_count,
+        vertex_buffer: {
+            let mut verts: Vec<RasterGpuVertex> = Vec::with_capacity(mesh.positions.len());
+            for (_i, pos) in mesh.positions.iter().enumerate() {
+                //let n = mesh.normals[i];
+                let n = [0.0f32, 0.0, 1.0];
+
+                verts.push(RasterGpuVertex {
+                    pos: *pos,
+                    normal: pack_unit_direction_11_10_11(n[0], n[1], n[2]),
+                });
+            }
+
+            let handle = handles.allocate(RenderResourceType::Buffer);
+            device.read()?.create_buffer(
+                handle,
+                &RenderBufferDesc {
+                    bind_flags: RenderBindFlags::SHADER_RESOURCE,
+                    size: size_of::<RasterGpuVertex>() * vertex_count as usize,
+                },
+                Some(&into_byte_vec(verts)),
+                "vertex buffer".into(),
+            )?;
+            handle
+        },
+    });
+
     for _ in 0..5 {
-        match render_loop.render_frame(
-            swapchain,
-            &pipeline_cache,
-            handles.clone(),
-            crate::render_passes::render_frame_rg,
-        ) {
+        match render_loop.render_frame(swapchain, &pipeline_cache, handles.clone(), || {
+            crate::render_passes::render_frame_rg(gpu_mesh.clone())
+        }) {
             Ok(()) => {
                 last_error_text = None;
             }
@@ -127,6 +180,9 @@ fn try_main() -> std::result::Result<(), anyhow::Error> {
     }
 
     device.write()?.device_wait_idle()?;
+    device
+        .write()?
+        .destroy_resource(Arc::try_unwrap(gpu_mesh).ok().unwrap().vertex_buffer)?;
     device.write()?.destroy_resource(error_output_texture)?;
     device.write()?.destroy_resource(swapchain)?;
 

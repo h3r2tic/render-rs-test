@@ -1,10 +1,14 @@
+use crate::mesh::{GpuTriangleMesh, RasterGpuVertex};
 use render_core::{
-    state::RenderState,
-    types::{RenderDrawPacket, RenderFormat, RenderTargetInfo},
+    state::{build, RenderState},
+    types::{
+        RenderDrawPacket, RenderFormat, RenderResourceType, RenderShaderViewsDesc, RenderTargetInfo,
+    },
 };
 use rg::{command_ext::*, resource_view::*, *};
+use std::{mem::size_of, sync::Arc};
 
-pub fn render_frame_rg() -> (RenderGraph, Handle<Texture>) {
+pub fn render_frame_rg(mesh: Arc<GpuTriangleMesh>) -> (RenderGraph, Handle<Texture>) {
     let mut rg = RenderGraph::new();
 
     let mut tex = synth_gradients(
@@ -15,7 +19,7 @@ pub fn render_frame_rg() -> (RenderGraph, Handle<Texture>) {
             format: RenderFormat::R16g16b16a16Float,
         },
     );
-    raster_triangle(&mut rg, &mut tex);
+    raster_mesh(mesh, &mut rg, &mut tex);
 
     let tex = blur(&mut rg, &tex);
     let tex = into_ycbcr(&mut rg, tex);
@@ -23,7 +27,7 @@ pub fn render_frame_rg() -> (RenderGraph, Handle<Texture>) {
     (rg, tex)
 }
 
-fn raster_triangle(rg: &mut RenderGraph, output: &mut Handle<Texture>) {
+fn raster_mesh(mesh: Arc<GpuTriangleMesh>, rg: &mut RenderGraph, output: &mut Handle<Texture>) {
     let mut pass = rg.add_pass();
     let output_ref = pass.raster(output);
 
@@ -45,11 +49,42 @@ fn raster_triangle(rg: &mut RenderGraph, output: &mut Handle<Texture>) {
         cb.begin_render_pass(registry.render_pass(&render_target)?)?;
         cb.draw(
             pipeline.handle,
-            &[RenderShaderArgument::default()],
+            &[RenderShaderArgument {
+                shader_views: Some({
+                    let resource_views = RenderShaderViewsDesc {
+                        shader_resource_views: vec![build::buffer(
+                            mesh.vertex_buffer,
+                            RenderFormat::Unknown,
+                            0,
+                            mesh.vertex_count,
+                            size_of::<RasterGpuVertex>() as _,
+                        )],
+                        unordered_access_views: Vec::new(),
+                    };
+
+                    let resource_views_handle = registry
+                        .execution_params
+                        .handles
+                        .allocate_transient(RenderResourceType::ShaderViews);
+
+                    registry
+                        .execution_params
+                        .device
+                        .create_shader_views(
+                            resource_views_handle,
+                            &resource_views,
+                            "shader resource views".into(),
+                        )
+                        .unwrap();
+
+                    resource_views_handle
+                }),
+                ..Default::default()
+            }],
             None,
             &render_target.to_draw_state(),
             &RenderDrawPacket {
-                vertex_count: 3,
+                vertex_count: mesh.vertex_count,
                 ..Default::default()
             },
         )?;

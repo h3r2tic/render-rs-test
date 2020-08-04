@@ -1,4 +1,7 @@
-use crate::render_device::{FrameResources, MaybeRenderDevice};
+use crate::{
+    owned_resource::get_resources_pending_release,
+    render_device::{FrameResources, MaybeRenderDevice},
+};
 
 use render_core::{encoder::RenderCommandList, handles::*, types::*};
 use rg::ResourceHandleAllocator;
@@ -75,6 +78,10 @@ impl RenderLoop {
             frame_resources
                 .handles
                 .append(&mut allocated_resources.transient);
+
+            frame_resources
+                .handles
+                .append(&mut get_resources_pending_release());
 
             self.persistent_resources
                 .append(&mut allocated_resources.persistent);

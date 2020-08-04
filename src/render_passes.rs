@@ -1,4 +1,4 @@
-use crate::mesh::{GpuTriangleMesh, RasterGpuVertex};
+use crate::mesh::{GpuTriangleMesh, PackedVertex};
 use render_core::{
     state::{build, RenderState},
     types::{
@@ -22,7 +22,7 @@ pub fn render_frame_rg(mesh: Arc<GpuTriangleMesh>) -> (RenderGraph, Handle<Textu
     raster_mesh(mesh, &mut rg, &mut tex);
 
     let tex = blur(&mut rg, &tex);
-    let tex = into_ycbcr(&mut rg, tex);
+    //let tex = into_ycbcr(&mut rg, tex);
 
     (rg, tex)
 }
@@ -53,11 +53,11 @@ fn raster_mesh(mesh: Arc<GpuTriangleMesh>, rg: &mut RenderGraph, output: &mut Ha
                 shader_views: Some({
                     let resource_views = RenderShaderViewsDesc {
                         shader_resource_views: vec![build::buffer(
-                            mesh.vertex_buffer,
+                            *mesh.vertex_buffer,
                             RenderFormat::Unknown,
                             0,
                             mesh.vertex_count,
-                            size_of::<RasterGpuVertex>() as _,
+                            size_of::<PackedVertex>() as _,
                         )],
                         unordered_access_views: Vec::new(),
                     };
@@ -81,7 +81,7 @@ fn raster_mesh(mesh: Arc<GpuTriangleMesh>, rg: &mut RenderGraph, output: &mut Ha
                 }),
                 ..Default::default()
             }],
-            None,
+            Some(*mesh.draw_binding),
             &render_target.to_draw_state(),
             &RenderDrawPacket {
                 vertex_count: mesh.vertex_count,
@@ -146,6 +146,7 @@ fn blur(rg: &mut RenderGraph, input: &Handle<Texture>) -> Handle<Texture> {
     output
 }
 
+#[allow(dead_code)]
 fn into_ycbcr(rg: &mut RenderGraph, mut input: Handle<Texture>) -> Handle<Texture> {
     let mut pass = rg.add_pass();
     let input_ref = pass.write(&mut input);

@@ -1,7 +1,14 @@
-use crate::owned_resource::OwnedRenderResourceHandle;
+use crate::{owned_resource::OwnedRenderResourceHandle, HandleAllocator};
 use glam::{Mat4, Vec3};
+use render_core::{
+    constants::MAX_VERTEX_STREAMS,
+    device::RenderDevice,
+    state::RenderBindingBuffer,
+    types::{RenderBindFlags, RenderBufferDesc, RenderDrawBindingSetDesc, RenderResourceType},
+};
 use std::{
     hash::Hash,
+    mem::size_of,
     path::{Path, PathBuf},
 };
 use turbosloth::*;
@@ -288,14 +295,6 @@ pub struct PackedTriangleMesh {
     pub maps: Vec<MeshMaterialMap>,
 }
 
-pub struct GpuTriangleMesh {
-    pub index_count: u32,
-    pub vertex_count: u32,
-    pub index_buffer: OwnedRenderResourceHandle,
-    pub vertex_buffer: OwnedRenderResourceHandle,
-    pub draw_binding: OwnedRenderResourceHandle,
-}
-
 pub fn pack_triangle_mesh(mesh: &TriangleMesh) -> PackedTriangleMesh {
     let mut verts: Vec<PackedVertex> = Vec::with_capacity(mesh.positions.len());
 
@@ -333,5 +332,86 @@ impl Default for GpuMaterial {
             base_color_mult: [0.0f32; 4],
             maps: [0; 4],
         }
+    }
+}
+
+pub struct GpuTriangleMesh {
+    pub index_count: u32,
+    pub vertex_count: u32,
+    pub index_buffer: OwnedRenderResourceHandle,
+    pub vertex_buffer: OwnedRenderResourceHandle,
+    pub draw_binding: OwnedRenderResourceHandle,
+}
+
+pub fn upload_mesh_to_gpu(
+    device: &dyn RenderDevice,
+    handles: &dyn HandleAllocator,
+    mesh: PackedTriangleMesh,
+) -> anyhow::Result<GpuTriangleMesh> {
+    let index_count = mesh.indices.len() as u32;
+    let index_buffer = {
+        let handle = handles.allocate(RenderResourceType::Buffer);
+        device.create_buffer(
+            handle,
+            &RenderBufferDesc {
+                bind_flags: RenderBindFlags::INDEX_BUFFER,
+                size: size_of::<u32>() * mesh.indices.len(),
+            },
+            Some(&into_byte_vec(mesh.indices)),
+            "index buffer".into(),
+        )?;
+        handle
+    };
+
+    let index_buffer_binding = RenderBindingBuffer {
+        resource: index_buffer,
+        offset: 0,
+        size: 0,
+        stride: 4,
+    };
+
+    Ok(GpuTriangleMesh {
+        index_count,
+        vertex_count: mesh.verts.len() as u32,
+        index_buffer: OwnedRenderResourceHandle::new(index_buffer),
+        vertex_buffer: {
+            let handle = handles.allocate(RenderResourceType::Buffer);
+            device.create_buffer(
+                handle,
+                &RenderBufferDesc {
+                    bind_flags: RenderBindFlags::SHADER_RESOURCE,
+                    size: size_of::<PackedVertex>() * mesh.verts.len(),
+                },
+                Some(&into_byte_vec(mesh.verts)),
+                "vertex buffer".into(),
+            )?;
+            OwnedRenderResourceHandle::new(handle)
+        },
+        draw_binding: {
+            let handle = handles.allocate(RenderResourceType::DrawBindingSet);
+            device.create_draw_binding_set(
+                handle,
+                &RenderDrawBindingSetDesc {
+                    vertex_buffers: [None; MAX_VERTEX_STREAMS],
+                    index_buffer: Some(index_buffer_binding),
+                },
+                "draw binding".into(),
+            )?;
+            OwnedRenderResourceHandle::new(handle)
+        },
+    })
+}
+
+pub fn into_byte_vec<T>(mut v: Vec<T>) -> Vec<u8>
+where
+    T: Copy,
+{
+    unsafe {
+        let p = v.as_mut_ptr();
+        let item_sizeof = std::mem::size_of::<T>();
+        let len = v.len() * item_sizeof;
+        let cap = v.capacity() * item_sizeof;
+        std::mem::forget(v);
+        Vec::from_raw_parts(p as *mut u8, len, cap)
     }
 }

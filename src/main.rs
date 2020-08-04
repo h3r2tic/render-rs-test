@@ -10,14 +10,10 @@ mod shader_compiler;
 use mesh::*;
 use owned_resource::{get_resources_pending_release, OwnedRenderResourceHandle};
 use render_core::{
-    constants::MAX_VERTEX_STREAMS, device::RenderDevice, handles::RenderResourceHandleAllocator,
-    state::RenderBindingBuffer, system::RenderSystem, types::*,
+    device::RenderDevice, handles::RenderResourceHandleAllocator, system::RenderSystem, types::*,
 };
 use render_device::{create_render_device, MaybeRenderDevice};
-use std::{
-    mem::size_of,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 use turbosloth::*;
 
 pub trait HandleAllocator {
@@ -59,20 +55,6 @@ fn create_swap_chain(
     )?;
 
     Ok(swapchain)
-}
-
-pub fn into_byte_vec<T>(mut v: Vec<T>) -> Vec<u8>
-where
-    T: Copy,
-{
-    unsafe {
-        let p = v.as_mut_ptr();
-        let item_sizeof = std::mem::size_of::<T>();
-        let len = v.len() * item_sizeof;
-        let cap = v.capacity() * item_sizeof;
-        std::mem::forget(v);
-        Vec::from_raw_parts(p as *mut u8, len, cap)
-    }
 }
 
 fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error> {
@@ -124,66 +106,20 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
     let mut render_loop = render_loop::RenderLoop::new(device.clone(), *error_output_texture);
     let mut last_error_text = None;
 
-    let mesh = LoadGltfScene {
-        path: "assets/scenes/the_lighthouse/scene.gltf".into(),
-        scale: 0.003,
-    }
-    .into_lazy();
-    let mesh = smol::block_on(mesh.eval(&lazy_cache))?;
-    let mesh = pack_triangle_mesh(&mesh);
+    let mesh = smol::run(
+        LoadGltfScene {
+            path: "assets/scenes/the_lighthouse/scene.gltf".into(),
+            scale: 0.003,
+        }
+        .into_lazy()
+        .eval(&lazy_cache),
+    )?;
 
-    let index_count = mesh.indices.len() as u32;
-    let index_buffer = {
-        let handle = handles.allocate(RenderResourceType::Buffer);
-        device.read()?.create_buffer(
-            handle,
-            &RenderBufferDesc {
-                bind_flags: RenderBindFlags::INDEX_BUFFER,
-                size: size_of::<u32>() * mesh.indices.len(),
-            },
-            Some(&into_byte_vec(mesh.indices)),
-            "index buffer".into(),
-        )?;
-        handle
-    };
-
-    let index_buffer_binding = RenderBindingBuffer {
-        resource: index_buffer,
-        offset: 0,
-        size: 0,
-        stride: 4,
-    };
-
-    let gpu_mesh = Arc::new(GpuTriangleMesh {
-        index_count,
-        vertex_count: mesh.verts.len() as u32,
-        index_buffer: OwnedRenderResourceHandle::new(index_buffer),
-        vertex_buffer: {
-            let handle = handles.allocate(RenderResourceType::Buffer);
-            device.read()?.create_buffer(
-                handle,
-                &RenderBufferDesc {
-                    bind_flags: RenderBindFlags::SHADER_RESOURCE,
-                    size: size_of::<PackedVertex>() * mesh.verts.len(),
-                },
-                Some(&into_byte_vec(mesh.verts)),
-                "vertex buffer".into(),
-            )?;
-            OwnedRenderResourceHandle::new(handle)
-        },
-        draw_binding: {
-            let handle = handles.allocate(RenderResourceType::DrawBindingSet);
-            device.read()?.create_draw_binding_set(
-                handle,
-                &RenderDrawBindingSetDesc {
-                    vertex_buffers: [None; MAX_VERTEX_STREAMS],
-                    index_buffer: Some(index_buffer_binding),
-                },
-                "draw binding".into(),
-            )?;
-            OwnedRenderResourceHandle::new(handle)
-        },
-    });
+    let gpu_mesh = Arc::new(upload_mesh_to_gpu(
+        &*device.read()?,
+        &handles,
+        pack_triangle_mesh(&mesh),
+    )?);
 
     for _ in 0..5 {
         match render_loop.render_frame(*swapchain, &pipeline_cache, handles.clone(), || {

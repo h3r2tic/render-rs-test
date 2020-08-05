@@ -26,7 +26,18 @@ Vertex unpack_vertex(VertexPacked p) {
     return res;
 }
 
+struct CameraMatrices {
+    float4x4 view_to_clip;
+    float4x4 clip_to_view;
+    float4x4 world_to_view;
+    float4x4 view_to_world;
+};
 
+struct Constants {
+    CameraMatrices camera;
+};
+
+ConstantBuffer<Constants> constants: register(b0);
 StructuredBuffer<VertexPacked> vertices;
 
 struct VsOut {
@@ -38,7 +49,7 @@ VsOut main(uint vid: SV_VertexID) {
     VsOut vsout;
 
     Vertex v = unpack_vertex(vertices[vid]);
-    vsout.position = float4(v.position * float3(9.0 / 16.0, 1.0, 1.0), 1);
+    vsout.position = mul(constants.camera.view_to_clip, mul(constants.camera.world_to_view, float4(v.position, 1)));
     vsout.color = float4(v.normal * 0.5 + 0.5, 1);
 
     return vsout;

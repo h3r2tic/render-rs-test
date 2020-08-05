@@ -1,14 +1,18 @@
-use crate::mesh::{GpuTriangleMesh, PackedVertex};
+use crate::{bytes::as_byte_slice, camera::CameraMatrices, mesh::GpuTriangleMesh};
 use render_core::{
-    state::{build, RenderState},
+    state::RenderState,
     types::{
-        RenderDrawPacket, RenderFormat, RenderResourceType, RenderShaderViewsDesc, RenderTargetInfo,
+        RenderBindFlags, RenderBufferDesc, RenderDrawPacket, RenderFormat, RenderResourceType,
+        RenderTargetInfo,
     },
 };
 use rg::{command_ext::*, resource_view::*, *};
 use std::{mem::size_of, sync::Arc};
 
-pub fn render_frame_rg(mesh: Arc<GpuTriangleMesh>) -> (RenderGraph, Handle<Texture>) {
+pub fn render_frame_rg(
+    camera_matrices: CameraMatrices,
+    mesh: Arc<GpuTriangleMesh>,
+) -> (RenderGraph, Handle<Texture>) {
     let mut rg = RenderGraph::new();
 
     let mut tex = synth_gradients(
@@ -19,7 +23,8 @@ pub fn render_frame_rg(mesh: Arc<GpuTriangleMesh>) -> (RenderGraph, Handle<Textu
             format: RenderFormat::R16g16b16a16Float,
         },
     );
-    raster_mesh(mesh, &mut rg, &mut tex);
+
+    raster_mesh(camera_matrices, mesh, &mut rg, &mut tex);
 
     let tex = blur(&mut rg, &tex);
     //let tex = into_ycbcr(&mut rg, tex);
@@ -27,7 +32,12 @@ pub fn render_frame_rg(mesh: Arc<GpuTriangleMesh>) -> (RenderGraph, Handle<Textu
     (rg, tex)
 }
 
-fn raster_mesh(mesh: Arc<GpuTriangleMesh>, rg: &mut RenderGraph, output: &mut Handle<Texture>) {
+fn raster_mesh(
+    camera_matrices: CameraMatrices,
+    mesh: Arc<GpuTriangleMesh>,
+    rg: &mut RenderGraph,
+    output: &mut Handle<Texture>,
+) {
     let mut pass = rg.add_pass();
     let output_ref = pass.raster(output);
 
@@ -46,45 +56,43 @@ fn raster_mesh(mesh: Arc<GpuTriangleMesh>, rg: &mut RenderGraph, output: &mut Ha
             &render_target,
         )?;
 
+        #[derive(Clone, Copy)]
+        #[repr(C)]
+        struct Constants {
+            camera_matrices: CameraMatrices,
+        }
+
+        let constants = Constants { camera_matrices };
+        let constants = {
+            let handle = registry
+                .execution_params
+                .handles
+                .allocate_transient(RenderResourceType::Buffer);
+
+            registry.execution_params.device.create_buffer(
+                handle,
+                &RenderBufferDesc {
+                    bind_flags: RenderBindFlags::CONSTANT_BUFFER,
+                    size: size_of::<Constants>(),
+                },
+                Some(as_byte_slice(&constants)),
+                "index buffer".into(),
+            )?;
+            handle
+        };
+
         cb.begin_render_pass(registry.render_pass(&render_target)?)?;
         cb.draw(
             pipeline.handle,
             &[RenderShaderArgument {
-                shader_views: Some({
-                    let resource_views = RenderShaderViewsDesc {
-                        shader_resource_views: vec![build::buffer(
-                            *mesh.vertex_buffer,
-                            RenderFormat::Unknown,
-                            0,
-                            mesh.vertex_count,
-                            size_of::<PackedVertex>() as _,
-                        )],
-                        unordered_access_views: Vec::new(),
-                    };
-
-                    let resource_views_handle = registry
-                        .execution_params
-                        .handles
-                        .allocate_transient(RenderResourceType::ShaderViews);
-
-                    registry
-                        .execution_params
-                        .device
-                        .create_shader_views(
-                            resource_views_handle,
-                            &resource_views,
-                            "shader resource views".into(),
-                        )
-                        .unwrap();
-
-                    resource_views_handle
-                }),
-                ..Default::default()
+                shader_views: Some(*mesh.shader_views),
+                constant_buffer: Some(constants),
+                constant_buffer_offset: 0,
             }],
             Some(*mesh.draw_binding),
             &render_target.to_draw_state(),
             &RenderDrawPacket {
-                vertex_count: mesh.vertex_count,
+                vertex_count: mesh.index_count,
                 ..Default::default()
             },
         )?;

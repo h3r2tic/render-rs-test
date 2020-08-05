@@ -1,4 +1,7 @@
+mod bytes;
+mod camera;
 mod file;
+mod math;
 mod mesh;
 mod owned_resource;
 mod render_device;
@@ -7,6 +10,8 @@ mod render_passes;
 mod shader_cache;
 mod shader_compiler;
 
+use camera::*;
+use math::*;
 use mesh::*;
 use owned_resource::{get_resources_pending_release, OwnedRenderResourceHandle};
 use render_core::{
@@ -85,6 +90,24 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
         shader_cache::TurboslothShaderCache::new(lazy_cache.clone()),
     );
 
+    let mesh = smol::run(
+        LoadGltfScene {
+            path: "assets/scenes/the_lighthouse/scene.gltf".into(),
+            scale: 0.01,
+        }
+        .into_lazy()
+        .eval(&lazy_cache),
+    )?;
+
+    let gpu_mesh = Arc::new(upload_mesh_to_gpu(
+        &*device.read()?,
+        &handles,
+        pack_triangle_mesh(&mesh),
+    )?);
+
+    #[allow(unused_mut)]
+    let mut camera = FirstPersonCamera::new(Vec3::new(0.0, 2.0, 10.0));
+
     let error_output_texture =
         OwnedRenderResourceHandle::new(handles.allocate(RenderResourceType::Texture));
     device.read()?.create_texture(
@@ -106,24 +129,11 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
     let mut render_loop = render_loop::RenderLoop::new(device.clone(), *error_output_texture);
     let mut last_error_text = None;
 
-    let mesh = smol::run(
-        LoadGltfScene {
-            path: "assets/scenes/the_lighthouse/scene.gltf".into(),
-            scale: 0.003,
-        }
-        .into_lazy()
-        .eval(&lazy_cache),
-    )?;
-
-    let gpu_mesh = Arc::new(upload_mesh_to_gpu(
-        &*device.read()?,
-        &handles,
-        pack_triangle_mesh(&mesh),
-    )?);
-
     for _ in 0..5 {
+        let camera_matrices = camera.calc_matrices();
+
         match render_loop.render_frame(*swapchain, &pipeline_cache, handles.clone(), || {
-            crate::render_passes::render_frame_rg(gpu_mesh.clone())
+            crate::render_passes::render_frame_rg(camera_matrices, gpu_mesh.clone())
         }) {
             Ok(()) => {
                 last_error_text = None;

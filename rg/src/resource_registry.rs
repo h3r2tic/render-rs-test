@@ -2,7 +2,7 @@ use crate::{
     graph::RenderGraphExecutionParams,
     pipeline::{ComputePipeline, RasterPipeline, RasterPipelineDesc},
     resource::*,
-    RenderTarget,
+    DynamicConstants, RenderTarget,
 };
 
 use render_core::{
@@ -12,14 +12,15 @@ use render_core::{
 };
 use std::{path::Path, sync::Arc};
 
-pub struct ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc> {
+pub struct ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc, 'constants> {
     pub execution_params:
         &'exec_params RenderGraphExecutionParams<'device, 'pipeline_cache, 'res_alloc>,
     pub(crate) resources: Vec<RenderResourceHandle>,
+    pub dynamic_constants: &'constants mut DynamicConstants,
 }
 
-impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
-    ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc>
+impl<'exec_params, 'device, 'pipeline_cache, 'res_alloc, 'constants>
+    ResourceRegistry<'exec_params, 'device, 'pipeline_cache, 'res_alloc, 'constants>
 {
     pub fn resource<T: Resource, GpuResType>(&self, resource: Ref<T, GpuResType>) -> GpuResType
     where

@@ -4,30 +4,50 @@ use crate::{
 };
 
 use render_core::{encoder::RenderCommandList, handles::*, types::*};
-use rg::ResourceHandleAllocator;
+use rg::{DynamicConstants, ResourceHandleAllocator};
 use std::{
     collections::VecDeque,
     sync::{Arc, RwLock},
 };
 
-pub struct RenderLoop {
+pub struct RenderLoop<'a> {
     device: MaybeRenderDevice,
     persistent_resources: Vec<RenderResourceHandle>,
     retired_frames: VecDeque<Option<FrameResources>>,
     error_output_texture: RenderResourceHandle,
+    main_command_list: RenderCommandList<'a>,
+    early_command_list: RenderCommandList<'a>,
+    dynamic_constants: DynamicConstants,
+    handles: Arc<RwLock<RenderResourceHandleAllocator>>,
 }
 
-impl RenderLoop {
-    pub fn new(device: MaybeRenderDevice, error_output_texture: RenderResourceHandle) -> Self {
+impl<'a> RenderLoop<'a> {
+    pub fn new(
+        device: MaybeRenderDevice,
+        handles: Arc<RwLock<RenderResourceHandleAllocator>>,
+        error_output_texture: RenderResourceHandle,
+    ) -> Self {
         let mut retired_frames: VecDeque<Option<FrameResources>> = Default::default();
         retired_frames.push_back(None);
         retired_frames.push_back(None);
+
+        let main_command_list =
+            RenderCommandList::new(handles.clone(), 1024 * 1024 * 16, 1024 * 1024).unwrap();
+
+        let early_command_list =
+            RenderCommandList::new(handles.clone(), 1024 * 1024 * 16, 1024 * 1024).unwrap();
+
+        let dynamic_constants = DynamicConstants::new(handles.clone());
 
         Self {
             device,
             persistent_resources: Default::default(),
             retired_frames,
             error_output_texture,
+            main_command_list,
+            early_command_list,
+            dynamic_constants,
+            handles,
         }
     }
 
@@ -35,7 +55,6 @@ impl RenderLoop {
         &mut self,
         swapchain: RenderResourceHandle,
         pipeline_cache: &rg::pipeline_cache::PipelineCache,
-        handles: Arc<RwLock<RenderResourceHandleAllocator>>,
         graph_gen_fn: impl FnOnce() -> (rg::RenderGraph, rg::Handle<rg::Texture>),
     ) -> anyhow::Result<()> {
         let device = &mut *self.device.write()?;
@@ -49,13 +68,18 @@ impl RenderLoop {
         }
 
         let mut frame_resources = FrameResources::default();
-        let handle_allocator = rg::TrackingResourceHandleAllocator::new(handles.clone());
+        let handle_allocator = rg::TrackingResourceHandleAllocator::new(self.handles.clone());
 
-        let main_command_list_handle =
+        let command_list_handle =
             handle_allocator.allocate_transient(RenderResourceType::CommandList);
 
-        device.create_command_list(main_command_list_handle, "Main command list".into())?;
-        let mut cb = RenderCommandList::new(handles, 1024 * 1024 * 16, 1024 * 1024)?;
+        device.create_command_list(command_list_handle, "Main command list".into())?;
+
+        let early_command_list = &mut self.early_command_list;
+        early_command_list.reset();
+
+        let mut main_command_list = &mut self.main_command_list;
+        main_command_list.reset();
 
         let resources_used_fence = handle_allocator.allocate_transient(RenderResourceType::Fence);
 
@@ -69,7 +93,8 @@ impl RenderLoop {
                     device: &*device,
                     pipeline_cache,
                 },
-                &mut cb,
+                &mut self.dynamic_constants,
+                &mut main_command_list,
                 tex,
             );
 
@@ -99,8 +124,15 @@ impl RenderLoop {
 
         frame_resources.resources_used_fence = Some(resources_used_fence);
 
-        device.compile_command_list(main_command_list_handle, &cb)?;
-        device.submit_command_list(main_command_list_handle, true, None, None, None)?;
+        self.dynamic_constants
+            .commit_and_reset(early_command_list, device);
+
+        device.compile_command_lists(
+            command_list_handle,
+            &[early_command_list, main_command_list],
+        )?;
+
+        device.submit_command_list(command_list_handle, true, None, None, None)?;
 
         let result = match output_texture {
             Ok(output_texture) => {
@@ -132,6 +164,8 @@ impl RenderLoop {
 
         device.device_wait_idle()?;
 
+        self.dynamic_constants.destroy(device);
+
         for frame_resources in self.retired_frames.drain(..) {
             if let Some(frame_resources) = frame_resources {
                 frame_resources.destroy_now(&*device);
@@ -146,7 +180,7 @@ impl RenderLoop {
     }
 }
 
-impl Drop for RenderLoop {
+impl<'a> Drop for RenderLoop<'a> {
     fn drop(&mut self) {
         self.destroy_resources().ok();
     }

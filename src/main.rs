@@ -126,13 +126,14 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
         "error output texture".into(),
     )?;
 
-    let mut render_loop = render_loop::RenderLoop::new(device.clone(), *error_output_texture);
+    let mut render_loop =
+        render_loop::RenderLoop::new(device.clone(), handles.clone(), *error_output_texture);
     let mut last_error_text = None;
 
     for _ in 0..5 {
         let camera_matrices = camera.calc_matrices();
 
-        match render_loop.render_frame(*swapchain, &pipeline_cache, handles.clone(), || {
+        match render_loop.render_frame(*swapchain, &pipeline_cache, || {
             crate::render_passes::render_frame_rg(camera_matrices, gpu_mesh.clone())
         }) {
             Ok(()) => {

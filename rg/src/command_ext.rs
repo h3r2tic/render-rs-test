@@ -2,6 +2,7 @@ use crate::pipeline::ComputePipeline;
 use render_core::encoder::RenderCommandList;
 
 pub use render_core::{
+    handles::RenderResourceHandle,
     state::{RenderDrawState, RenderScissorRect, RenderViewportRect},
     types::{RenderShaderArgument, RenderShaderType},
 };

@@ -2,7 +2,7 @@
 
 use crate::{
     pass_builder::PassBuilder, pipeline_cache::PipelineCache, resource::*,
-    resource_registry::ResourceRegistry, shader_cache::*,
+    resource_registry::ResourceRegistry, shader_cache::*, DynamicConstants,
 };
 
 use render_core::{
@@ -159,6 +159,7 @@ impl RenderGraph {
     pub fn execute<'device, 'pipeline_cache, 'cb, 'commands, 'res_alloc>(
         self,
         params: RenderGraphExecutionParams<'device, 'pipeline_cache, 'res_alloc>,
+        dynamic_constants: &mut DynamicConstants,
         cb: &'cb mut RenderCommandList<'commands>,
         // TODO: use exported/imported resources instead
         get_output_texture: Handle<Texture>,
@@ -209,9 +210,10 @@ impl RenderGraph {
             })
             .collect();
 
-        let resource_registry = ResourceRegistry {
+        let mut resource_registry = ResourceRegistry {
             execution_params: &params,
             resources: gpu_resources,
+            dynamic_constants: dynamic_constants,
         };
 
         let mut transitions = Vec::new();
@@ -226,7 +228,7 @@ impl RenderGraph {
             }
             cb.transitions(&transitions)?;
 
-            (pass.render_fn.unwrap())(cb, &resource_registry)?;
+            (pass.render_fn.unwrap())(cb, &mut resource_registry)?;
         }
 
         let output_texture = resource_registry.resources[get_output_texture.raw.id as usize];
@@ -240,7 +242,8 @@ impl RenderGraph {
     }
 }
 
-type DynRenderFn = dyn FnOnce(&mut RenderCommandList<'_>, &ResourceRegistry) -> anyhow::Result<()>;
+type DynRenderFn =
+    dyn FnOnce(&mut RenderCommandList<'_>, &mut ResourceRegistry) -> anyhow::Result<()>;
 
 pub(crate) struct PassResourceRef {
     pub handle: GraphRawResourceHandle,

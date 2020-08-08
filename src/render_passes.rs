@@ -1,4 +1,4 @@
-use crate::{camera::CameraMatrices, mesh::GpuTriangleMesh};
+use crate::{camera::CameraMatrices, mesh::GpuTriangleMesh, RaytraceData};
 use render_core::{
     state::RenderState,
     types::{RenderDrawPacket, RenderFormat, RenderTargetInfo},
@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub fn render_frame_rg(
     camera_matrices: CameraMatrices,
     mesh: Arc<GpuTriangleMesh>,
+    rt_data: RaytraceData,
 ) -> (RenderGraph, Handle<Texture>) {
     let mut rg = RenderGraph::new();
 
@@ -21,12 +22,39 @@ pub fn render_frame_rg(
         },
     );
 
-    raster_mesh(camera_matrices, mesh, &mut rg, &mut tex);
+    //raster_mesh(camera_matrices, mesh, &mut rg, &mut tex);
+    test_raytrace(rt_data, &mut rg, &mut tex);
 
-    let tex = blur(&mut rg, &tex);
+    //let tex = blur(&mut rg, &tex);
     //let tex = into_ycbcr(&mut rg, tex);
 
     (rg, tex)
+}
+
+fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handle<Texture>) {
+    let mut pass = rg.add_pass();
+    let output_ref = pass.write(output);
+
+    pass.render(move |cb, resources| {
+        /*cb.update_shader_table(
+            rt_data.shader_table,
+            &RenderShaderTableUpdateDesc {
+                ray_gen_entries: (),
+                hit_entries: (),
+                miss_entries: (),
+            },
+        );*/
+        cb.ray_trace(
+            rt_data.pipeline_state,
+            rt_data.shader_table,
+            rt_data.top_acceleration,
+            resources.resource(output_ref).0,
+            1280,
+            720,
+            0,
+        )?;
+        Ok(())
+    });
 }
 
 fn raster_mesh(

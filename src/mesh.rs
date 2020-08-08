@@ -233,8 +233,6 @@ impl LazyWorker for LoadGltfScene {
                                     (base_index..(base_index + positions.len() as u32)).collect();
                             }
 
-                            println!("Loading a mesh with {} indices", indices.len());
-
                             res.indices.append(&mut indices);
                             res.tangents.append(&mut tangents);
                             res.material_ids.append(&mut material_ids);
@@ -339,11 +337,13 @@ impl Default for GpuMaterial {
 }
 
 pub struct GpuTriangleMesh {
-    pub index_count: u32,
     pub index_buffer: OwnedRenderResourceHandle,
     pub vertex_buffer: OwnedRenderResourceHandle,
     pub draw_binding: OwnedRenderResourceHandle,
     pub shader_views: OwnedRenderResourceHandle,
+    pub index_count: u32,
+    pub vertex_buffer_bytes: usize,
+    pub index_buffer_bytes: usize,
 }
 
 pub fn upload_mesh_to_gpu(
@@ -352,13 +352,15 @@ pub fn upload_mesh_to_gpu(
     mesh: PackedTriangleMesh,
 ) -> anyhow::Result<GpuTriangleMesh> {
     let index_count = mesh.indices.len() as u32;
+    let index_buffer_bytes = size_of::<u32>() * mesh.indices.len();
+
     let index_buffer = {
         let handle = handles.allocate(RenderResourceType::Buffer);
         device.create_buffer(
             handle,
             &RenderBufferDesc {
                 bind_flags: RenderBindFlags::INDEX_BUFFER,
-                size: size_of::<u32>() * mesh.indices.len(),
+                size: index_buffer_bytes,
             },
             Some(&into_byte_vec(mesh.indices)),
             "index buffer".into(),
@@ -374,13 +376,15 @@ pub fn upload_mesh_to_gpu(
     };
 
     let vertex_buffer_elem_count = mesh.verts.len() as u32;
+    let vertex_buffer_bytes = size_of::<PackedVertex>() * mesh.verts.len();
+
     let vertex_buffer = {
         let handle = handles.allocate(RenderResourceType::Buffer);
         device.create_buffer(
             handle,
             &RenderBufferDesc {
                 bind_flags: RenderBindFlags::SHADER_RESOURCE,
-                size: size_of::<PackedVertex>() * mesh.verts.len(),
+                size: vertex_buffer_bytes,
             },
             Some(&into_byte_vec(mesh.verts)),
             "vertex buffer".into(),
@@ -413,7 +417,6 @@ pub fn upload_mesh_to_gpu(
     };
 
     Ok(GpuTriangleMesh {
-        index_count,
         index_buffer: OwnedRenderResourceHandle::new(index_buffer),
         vertex_buffer,
         draw_binding: {
@@ -429,5 +432,8 @@ pub fn upload_mesh_to_gpu(
             OwnedRenderResourceHandle::new(handle)
         },
         shader_views,
+        index_count,
+        vertex_buffer_bytes,
+        index_buffer_bytes,
     })
 }

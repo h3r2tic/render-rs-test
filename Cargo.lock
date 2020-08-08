@@ -888,6 +888,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "guardian"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "765f1766be8e0d0ea57c0d441b2d4b8e44677f49d1a5ffabe6a4bf43afdeca54"
+
+[[package]]
 name = "hassle-rs"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1608,6 +1614,7 @@ dependencies = [
  "enum_primitive",
  "fern",
  "glob",
+ "guardian",
  "libloading 0.5.2",
  "log",
  "option_set",
@@ -1666,6 +1673,7 @@ name = "render-rs-test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "array-init",
  "bincode",
  "byte-slice-cast",
  "chrono",
@@ -1734,7 +1742,6 @@ dependencies = [
  "render-hal-vk",
  "rspirv",
  "shader-prepper",
- "spirv-reflect",
  "winit",
  "wyhash",
 ]
@@ -1945,15 +1952,13 @@ dependencies = [
 
 [[package]]
 name = "spirv-reflect"
-version = "0.2.3"
-source = "git+https://github.com/h3r2tic/spirv-reflect-rs.git?rev=47636b8#47636b8053d4014b429c3bc40d2a08c3bf2cdf54"
+version = "0.2.5"
 dependencies = [
  "bitflags",
- "cc",
  "num-traits 0.2.12",
  "serde",
  "serde_derive",
- "spirv_headers 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spirv_headers 1.4.2 (git+https://github.com/Traverse-Research/rspirv.git?rev=fe9dd29)",
 ]
 
 [[package]]
@@ -1968,8 +1973,7 @@ dependencies = [
 [[package]]
 name = "spirv_headers"
 version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f1418983d16481227ffa3ab3cf44ef92eebc9a76c092fbcd4c51a64ff032622"
+source = "git+https://github.com/Traverse-Research/rspirv.git?rev=fe9dd29#fe9dd296f8b4507ebb6d46af9db5b662e32f4880"
 dependencies = [
  "bitflags",
  "num-traits 0.2.12",

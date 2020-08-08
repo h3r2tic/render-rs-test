@@ -3,7 +3,7 @@
 use anyhow::{anyhow, bail, Result};
 use byte_slice_cast::IntoByteVec;
 use relative_path::{RelativePath, RelativePathBuf};
-use render_core::types::RenderShaderType;
+use render_core::types::{RayTracingShaderType, RenderShaderType};
 use shader_prepper;
 use std::{
     collections::{HashMap, HashSet},
@@ -69,10 +69,16 @@ fn compile_cs_hlsl_impl(
         }
 
         let t0 = std::time::Instant::now();
-        let spirv =
-            hassle_rs::compile_hlsl(&name, &source_text, "main", "cs_6_4", &["-spirv"], &[])
-                .map_err(|err| anyhow!("{}", err))?;
-        println!("dxc took {:?}", t0.elapsed());
+        let spirv = hassle_rs::compile_hlsl(
+            &name,
+            &source_text,
+            "main",
+            "cs_6_4",
+            &["-spirv", "-fspv-target-env=vulkan1.2"],
+            &[],
+        )
+        .map_err(|err| anyhow!("{}", err))?;
+        println!("dxc took {:?} for {}", t0.elapsed(), name);
 
         use byte_slice_cast::*;
         reflect_spirv_shader(spirv.as_slice_of::<u32>()?)?
@@ -86,18 +92,19 @@ fn compile_cs_hlsl_impl(
 
     let descriptor_sets = refl.enumerate_descriptor_sets(None).unwrap();
     {
-        let set = &descriptor_sets[0];
-        for binding_index in 0..set.bindings.len() {
-            let binding = &set.bindings[binding_index];
+        let descriptor_set = &descriptor_sets[0].value;
+        for binding in descriptor_set.binding_refs.iter() {
+            let binding = &binding.value;
+
             assert_ne!(
                 binding.resource_type,
-                spirv_reflect::types::resource::ReflectResourceType::Undefined
+                spirv_reflect::types::resource::ReflectResourceTypeFlags::UNDEFINED
             );
             match binding.resource_type {
-                spirv_reflect::types::resource::ReflectResourceType::ShaderResourceView => {
+                spirv_reflect::types::resource::ReflectResourceTypeFlags::SHADER_RESOURCE_VIEW => {
                     srvs.push(binding.name.clone());
                 }
-                spirv_reflect::types::resource::ReflectResourceType::UnorderedAccessView => {
+                spirv_reflect::types::resource::ReflectResourceTypeFlags::UNORDERED_ACCESS_VIEW => {
                     uavs.push(binding.name.clone());
                 }
                 _ => {}
@@ -108,10 +115,16 @@ fn compile_cs_hlsl_impl(
     Ok(ComputeShader {
         name,
         group_size: local_size,
-        spirv: spirv.into_byte_vec(),
+        spirv: spirv.to_owned().into_byte_vec(),
         srvs,
         uavs,
     })
+}
+
+pub struct RasterShader {
+    pub name: String,
+    pub stage: RenderShaderType,
+    pub spirv: Vec<u8>,
 }
 
 #[derive(Clone, Hash)]
@@ -147,54 +160,75 @@ impl LazyWorker for CompileRasterShader {
 
         match ext.as_str() {
             "glsl" => unimplemented!(),
-            "hlsl" => compile_raster_shader_hlsl_impl(name, self.stage, &source),
+            "hlsl" => {
+                let target_profile = match self.stage {
+                    RenderShaderType::Vertex => "vs_6_4",
+                    RenderShaderType::Geometry => "gs_6_4",
+                    RenderShaderType::Hull => "hs_6_4",
+                    RenderShaderType::Domain => "ds_6_4",
+                    RenderShaderType::Pixel => "ps_6_4",
+                    RenderShaderType::Compute => unreachable!(),
+                };
+
+                let spirv = compile_generic_shader_hlsl_impl(&name, &source, target_profile)?;
+
+                Ok(RasterShader {
+                    name,
+                    stage: self.stage,
+                    spirv,
+                })
+            }
             _ => anyhow::bail!("Unrecognized shader file extension: {}", ext),
         }
     }
 }
 
-pub struct RasterShader {
+pub struct RayTracingShader {
     pub name: String,
-    pub stage: RenderShaderType,
     pub spirv: Vec<u8>,
 }
 
-fn compile_raster_shader_hlsl_impl(
-    name: String,
-    stage: RenderShaderType,
-    source: &[shader_prepper::SourceChunk],
-) -> Result<RasterShader> {
-    let mut source_text = String::new();
-    for s in source {
-        source_text += &s.source;
+#[derive(Clone, Hash)]
+pub struct CompileRayTracingShader {
+    pub path: PathBuf,
+}
+
+#[async_trait]
+impl LazyWorker for CompileRayTracingShader {
+    type Output = Result<RayTracingShader>;
+
+    async fn run(self, ctx: RunContext) -> Self::Output {
+        let file_path = self.path.to_str().unwrap().to_owned();
+        let source = shader_prepper::process_file(
+            &file_path,
+            &mut ShaderIncludeProvider { ctx: ctx.clone() },
+            String::new(),
+        );
+        let source = source.map_err(|err| anyhow!("{}", err))?;
+
+        let ext = self
+            .path
+            .extension()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or("".to_string());
+
+        let name = self
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or("unknown".to_string());
+
+        match ext.as_str() {
+            "glsl" => unimplemented!(),
+            "hlsl" => {
+                let target_profile = "lib_6_4";
+                let spirv = compile_generic_shader_hlsl_impl(&name, &source, target_profile)?;
+
+                Ok(RayTracingShader { name, spirv })
+            }
+            _ => anyhow::bail!("Unrecognized shader file extension: {}", ext),
+        }
     }
-
-    let target_profile = match stage {
-        RenderShaderType::Vertex => "vs_6_4",
-        RenderShaderType::Geometry => "gs_6_4",
-        RenderShaderType::Hull => "hs_6_4",
-        RenderShaderType::Domain => "ds_6_4",
-        RenderShaderType::Pixel => "ps_6_4",
-        RenderShaderType::Compute => unreachable!(),
-    };
-
-    let t0 = std::time::Instant::now();
-    let spirv = hassle_rs::compile_hlsl(
-        &name,
-        &source_text,
-        "main",
-        target_profile,
-        &["-spirv"],
-        &[],
-    )
-    .map_err(|err| anyhow!("{}", err))?;
-    println!("dxc took {:?}", t0.elapsed());
-
-    Ok(RasterShader {
-        name,
-        stage,
-        spirv: spirv.into_byte_vec(),
-    })
 }
 
 struct ShaderIncludeProvider {
@@ -261,9 +295,34 @@ fn get_cs_local_size_from_spirv(spirv: &[u32]) -> Result<[u32; 3]> {
     Err(anyhow!("Could not find a ExecutionMode SPIR-V op"))
 }
 
-fn convert_spirv_reflect_err<T>(res: std::result::Result<T, &'static str>) -> Result<T> {
+fn convert_spirv_reflect_err<T>(res: std::result::Result<T, String>) -> Result<T> {
     match res {
         Ok(res) => Ok(res),
         Err(e) => Err(anyhow!("SPIR-V reflection error: {}", e)),
     }
+}
+
+fn compile_generic_shader_hlsl_impl(
+    name: &str,
+    source: &[shader_prepper::SourceChunk],
+    target_profile: &str,
+) -> Result<Vec<u8>> {
+    let mut source_text = String::new();
+    for s in source {
+        source_text += &s.source;
+    }
+
+    let t0 = std::time::Instant::now();
+    let spirv = hassle_rs::compile_hlsl(
+        &name,
+        &source_text,
+        "main",
+        target_profile,
+        &["-spirv", "-fspv-target-env=vulkan1.2"],
+        &[],
+    )
+    .map_err(|err| anyhow!("{}", err))?;
+    println!("dxc took {:?} for {}", t0.elapsed(), name);
+
+    Ok(spirv)
 }

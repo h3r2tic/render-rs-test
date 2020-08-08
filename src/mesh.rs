@@ -359,7 +359,7 @@ pub fn upload_mesh_to_gpu(
         device.create_buffer(
             handle,
             &RenderBufferDesc {
-                bind_flags: RenderBindFlags::INDEX_BUFFER,
+                bind_flags: RenderBindFlags::INDEX_BUFFER | RenderBindFlags::DEVICE_ADDRESS,
                 size: index_buffer_bytes,
             },
             Some(&into_byte_vec(mesh.indices)),
@@ -383,7 +383,7 @@ pub fn upload_mesh_to_gpu(
         device.create_buffer(
             handle,
             &RenderBufferDesc {
-                bind_flags: RenderBindFlags::SHADER_RESOURCE,
+                bind_flags: RenderBindFlags::SHADER_RESOURCE | RenderBindFlags::DEVICE_ADDRESS,
                 size: vertex_buffer_bytes,
             },
             Some(&into_byte_vec(mesh.verts)),

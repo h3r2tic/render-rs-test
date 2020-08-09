@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{camera::CameraMatrices, mesh::GpuTriangleMesh, RaytraceData};
 use render_core::{
     state::{build, RenderShaderTableUpdateDesc, RenderShaderTableUpdateEntry, RenderState},
@@ -8,6 +10,7 @@ use render_core::{
 use rg::{command_ext::*, resource_view::*, *};
 use std::sync::Arc;
 
+#[allow(unused_variables)]
 pub fn render_frame_rg(
     camera_matrices: CameraMatrices,
     mesh: Arc<GpuTriangleMesh>,
@@ -36,7 +39,7 @@ pub fn render_frame_rg(
 fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handle<Texture>) {
     let mut pass = rg.add_pass();
     let output_ref = pass.write(output);
-    let output_fmt = output_ref.desc().format;
+    let output_desc = *output_ref.desc();
 
     pass.render(move |cb, resources| {
         let raygen_shader_views = {
@@ -46,7 +49,7 @@ fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handl
                 )],
                 unordered_access_views: vec![build::texture_2d_rw(
                     resources.resource(output_ref).0,
-                    output_fmt,
+                    output_desc.format,
                     0,
                     0,
                 )],
@@ -90,8 +93,8 @@ fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handl
             rt_data.pipeline_state,
             rt_data.shader_table,
             rt_data.top_acceleration,
-            1280,
-            720,
+            output_desc.width,
+            output_desc.height,
             0,
         )?;
         Ok(())

@@ -5,8 +5,9 @@ use render_core::{
     device::RenderDevice,
     state::{build, RenderBindingBuffer},
     types::{
-        RenderBindFlags, RenderBufferDesc, RenderDrawBindingSetDesc, RenderFormat,
-        RenderResourceType, RenderShaderViewsDesc,
+        RayTracingGeometryDesc, RayTracingGeometryPart, RayTracingGeometryType, RenderBindFlags,
+        RenderBufferDesc, RenderDrawBindingSetDesc, RenderFormat, RenderResourceType,
+        RenderShaderViewsDesc,
     },
 };
 use std::{
@@ -436,4 +437,29 @@ pub fn upload_mesh_to_gpu(
         vertex_buffer_bytes,
         index_buffer_bytes,
     })
+}
+
+impl GpuTriangleMesh {
+    pub fn to_ray_tracing_geometry(&self) -> RayTracingGeometryDesc {
+        RayTracingGeometryDesc {
+            geometry_type: RayTracingGeometryType::Triangle,
+            vertex_buffer: RenderBindingBuffer {
+                resource: *self.vertex_buffer,
+                offset: 0,
+                size: self.vertex_buffer_bytes,
+                stride: std::mem::size_of::<PackedVertex>() as _,
+            },
+            index_buffer: RenderBindingBuffer {
+                resource: *self.index_buffer,
+                offset: 0,
+                size: self.index_buffer_bytes,
+                stride: 4,
+            },
+            vertex_format: RenderFormat::R32g32b32Float,
+            parts: vec![RayTracingGeometryPart {
+                index_count: self.index_count,
+                index_offset: 0,
+            }],
+        }
+    }
 }

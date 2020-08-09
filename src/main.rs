@@ -7,6 +7,7 @@ mod owned_resource;
 mod render_device;
 mod render_loop;
 mod render_passes;
+mod rt_util;
 mod shader_cache;
 mod shader_compiler;
 
@@ -15,12 +16,9 @@ use math::*;
 use mesh::*;
 use owned_resource::{get_resources_pending_release, OwnedRenderResourceHandle};
 use render_core::{
-    constants::MAX_RAY_TRACING_SHADER_TYPE, device::RenderDevice,
-    handles::RenderResourceHandleAllocator, state::RenderBindingBuffer, system::RenderSystem,
-    types::*,
+    device::RenderDevice, handles::RenderResourceHandleAllocator, system::RenderSystem, types::*,
 };
 use render_device::{create_render_device, MaybeRenderDevice};
-use shader_compiler::CompileRayTracingShader;
 use std::sync::{Arc, RwLock};
 use turbosloth::*;
 
@@ -119,26 +117,7 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
     device.read()?.create_ray_tracing_bottom_acceleration(
         bottom_as,
         &RayTracingBottomAccelerationDesc {
-            geometries: vec![RayTracingGeometryDesc {
-                geometry_type: RayTracingGeometryType::Triangle,
-                vertex_buffer: RenderBindingBuffer {
-                    resource: *gpu_mesh.vertex_buffer,
-                    offset: 0,
-                    size: gpu_mesh.vertex_buffer_bytes,
-                    stride: std::mem::size_of::<PackedVertex>() as _,
-                },
-                index_buffer: RenderBindingBuffer {
-                    resource: *gpu_mesh.index_buffer,
-                    offset: 0,
-                    size: gpu_mesh.index_buffer_bytes,
-                    stride: 4,
-                },
-                vertex_format: RenderFormat::R32g32b32Float,
-                parts: vec![RayTracingGeometryPart {
-                    index_count: gpu_mesh.index_count,
-                    index_offset: 0,
-                }],
-            }],
+            geometries: vec![gpu_mesh.to_ray_tracing_geometry()],
         },
         "BLAS".into(),
     )?;
@@ -152,97 +131,13 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
         "TLAS".into(),
     )?;
 
-    let raygen_shader =
-        OwnedRenderResourceHandle::new(handles.allocate(RenderResourceType::RayTracingProgram));
-    device.read()?.create_ray_tracing_program(
-        *raygen_shader,
-        &RayTracingProgramDesc {
-            program_type: RayTracingProgramType::RayGen,
-            shaders: {
-                let mut shaders: [_; MAX_RAY_TRACING_SHADER_TYPE] =
-                    array_init::array_init(|_| None);
-                shaders[RayTracingShaderType::RayGen as usize] = Some(RayTracingShaderDesc {
-                    entry_point: "main".to_owned(),
-                    shader_data: smol::block_on(
-                        CompileRayTracingShader {
-                            path: "/assets/shaders/rt/triangle.rgen.hlsl".into(),
-                        }
-                        .into_lazy()
-                        .eval(&lazy_cache),
-                    )?
-                    .spirv
-                    .clone(),
-                });
-                shaders
-            },
-            signature: RenderShaderSignatureDesc::default(), // TODO
-        },
-        "raygen shader".into(),
-    )?;
-
-    let miss_shader =
-        OwnedRenderResourceHandle::new(handles.allocate(RenderResourceType::RayTracingProgram));
-    device.read()?.create_ray_tracing_program(
-        *miss_shader,
-        &RayTracingProgramDesc {
-            program_type: RayTracingProgramType::Miss,
-            shaders: {
-                let mut shaders: [_; MAX_RAY_TRACING_SHADER_TYPE] =
-                    array_init::array_init(|_| None);
-                shaders[RayTracingShaderType::Miss as usize] = Some(RayTracingShaderDesc {
-                    entry_point: "main".to_owned(),
-                    shader_data: smol::block_on(
-                        CompileRayTracingShader {
-                            path: "/assets/shaders/rt/triangle.rmiss.hlsl".into(),
-                        }
-                        .into_lazy()
-                        .eval(&lazy_cache),
-                    )?
-                    .spirv
-                    .clone(),
-                });
-                shaders
-            },
-            signature: RenderShaderSignatureDesc::default(), // TODO
-        },
-        "miss shader".into(),
-    )?;
-
-    let hit_shader =
-        OwnedRenderResourceHandle::new(handles.allocate(RenderResourceType::RayTracingProgram));
-    device.read()?.create_ray_tracing_program(
-        *hit_shader,
-        &RayTracingProgramDesc {
-            program_type: RayTracingProgramType::Hit,
-            shaders: {
-                let mut shaders: [_; MAX_RAY_TRACING_SHADER_TYPE] =
-                    array_init::array_init(|_| None);
-                shaders[RayTracingShaderType::ClosestHit as usize] = Some(RayTracingShaderDesc {
-                    entry_point: "main".to_owned(),
-                    shader_data: smol::block_on(
-                        CompileRayTracingShader {
-                            path: "/assets/shaders/rt/triangle.rchit.hlsl".into(),
-                        }
-                        .into_lazy()
-                        .eval(&lazy_cache),
-                    )?
-                    .spirv
-                    .clone(),
-                });
-                shaders
-            },
-            signature: RenderShaderSignatureDesc::default(), // TODO
-        },
-        "hit shader".into(),
-    )?;
-
-    let rt_pipeline_state = handles.allocate(RenderResourceType::RayTracingPipelineState);
-    device.read()?.create_ray_tracing_pipeline_state(
-        rt_pipeline_state,
-        &RayTracingPipelineStateDesc {
-            programs: vec![*raygen_shader, *miss_shader, *hit_shader],
-        },
-        "rt pipeline state".into(),
+    let rt_pipeline_state = rt_util::create_ray_tracing_pipeline_state(
+        "/assets/shaders/rt/triangle.rgen.hlsl".into(),
+        "/assets/shaders/rt/triangle.rmiss.hlsl".into(),
+        "/assets/shaders/rt/triangle.rchit.hlsl".into(),
+        &device,
+        handles.clone(),
+        lazy_cache.clone(),
     )?;
 
     let sbt = handles.allocate(RenderResourceType::RayTracingShaderTable);

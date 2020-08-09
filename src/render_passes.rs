@@ -72,16 +72,13 @@ fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handl
             shader_views
         };
 
+        // TODO: supply`RenderShaderArgument`s to `ray_trace` instead of here (modify API).
         cb.update_shader_table(
             rt_data.shader_table,
             RenderShaderTableUpdateDesc {
                 ray_gen_entries: vec![RenderShaderTableUpdateEntry {
                     program: None,
-                    shader_arguments: vec![RenderShaderArgument {
-                        /// Allowed to be None if not used by shader
-                        shader_views: Some(raygen_shader_views),
-                        ..Default::default()
-                    }],
+                    shader_arguments: vec![RenderShaderArgument::new(raygen_shader_views)],
                 }],
                 hit_entries: Default::default(),
                 miss_entries: Default::default(),

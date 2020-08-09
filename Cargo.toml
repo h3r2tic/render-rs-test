@@ -29,7 +29,7 @@ rspirv = { git = "https://github.com/Traverse-Research/rspirv.git" }
 serde = { version = "1.0", features = ["derive"] }
 shader-prepper = "0.2"
 smol = "0.3"
-spirv-reflect = { git = "https://github.com/h3r2tic/spirv-reflect-rs.git", rev = "246a700" }
+spirv-reflect = { git = "https://github.com/h3r2tic/spirv-reflect-rs.git", rev = "a51ba47" }
 turbosloth = "0.2.0"
 turbosloth-macros = "0.1.0"
 winit = "0.19"
@@ -37,5 +37,8 @@ winit = "0.19"
 [patch.crates-io]
 turbosloth = { path = "../turbosloth" }
 
-[patch."https://github.com/h3r2tic/spirv-reflect-rs.git"]
-spirv-reflect = { path = "../spirv-reflect-rs" }
+#[patch."https://github.com/h3r2tic/spirv-reflect-rs.git"]
+#spirv-reflect = { path = "../spirv-reflect-rs" }
+
+[profile.release]
+debug = true

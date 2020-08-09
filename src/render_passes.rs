@@ -1,7 +1,9 @@
 use crate::{camera::CameraMatrices, mesh::GpuTriangleMesh, RaytraceData};
 use render_core::{
-    state::RenderState,
-    types::{RenderDrawPacket, RenderFormat, RenderTargetInfo},
+    state::{build, RenderShaderTableUpdateDesc, RenderShaderTableUpdateEntry, RenderState},
+    types::{
+        RenderDrawPacket, RenderFormat, RenderResourceType, RenderShaderViewsDesc, RenderTargetInfo,
+    },
 };
 use rg::{command_ext::*, resource_view::*, *};
 use std::sync::Arc;
@@ -34,21 +36,60 @@ pub fn render_frame_rg(
 fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handle<Texture>) {
     let mut pass = rg.add_pass();
     let output_ref = pass.write(output);
+    let output_fmt = output_ref.desc().format;
 
     pass.render(move |cb, resources| {
-        /*cb.update_shader_table(
+        let raygen_shader_views = {
+            let resource_views = RenderShaderViewsDesc {
+                shader_resource_views: vec![build::ray_tracing_acceleration(
+                    rt_data.top_acceleration,
+                )],
+                unordered_access_views: vec![build::texture_2d_rw(
+                    resources.resource(output_ref).0,
+                    output_fmt,
+                    0,
+                    0,
+                )],
+            };
+
+            let shader_views = resources
+                .execution_params
+                .handles
+                .allocate_transient(RenderResourceType::ShaderViews);
+
+            resources
+                .execution_params
+                .device
+                .create_shader_views(
+                    shader_views,
+                    &resource_views,
+                    "shader resource views".into(),
+                )
+                .unwrap();
+            shader_views
+        };
+
+        cb.update_shader_table(
             rt_data.shader_table,
-            &RenderShaderTableUpdateDesc {
-                ray_gen_entries: (),
-                hit_entries: (),
-                miss_entries: (),
+            RenderShaderTableUpdateDesc {
+                ray_gen_entries: vec![RenderShaderTableUpdateEntry {
+                    program: None,
+                    shader_arguments: vec![RenderShaderArgument {
+                        /// Allowed to be None if not used by shader
+                        shader_views: Some(raygen_shader_views),
+                        ..Default::default()
+                    }],
+                }],
+                hit_entries: Default::default(),
+                miss_entries: Default::default(),
+                pipeline_state: rt_data.pipeline_state,
             },
-        );*/
+        )?;
+
         cb.ray_trace(
             rt_data.pipeline_state,
             rt_data.shader_table,
             rt_data.top_acceleration,
-            resources.resource(output_ref).0,
             1280,
             720,
             0,

@@ -172,7 +172,6 @@ fn try_main(device: &MaybeRenderDevice) -> std::result::Result<(), anyhow::Error
                     )?
                     .spirv
                     .clone(),
-                    //shader_data: (&include_bytes!("../glsl_rgen.spv")[..]).to_owned(),
                 });
                 shaders
             },

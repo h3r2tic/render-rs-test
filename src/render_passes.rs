@@ -2,7 +2,7 @@
 
 use crate::{camera::CameraMatrices, mesh::GpuTriangleMesh, RaytraceData};
 use render_core::{
-    state::{build, RenderShaderTableUpdateDesc, RenderShaderTableUpdateEntry, RenderState},
+    state::{build, RenderState},
     types::{
         RenderDrawPacket, RenderFormat, RenderResourceType, RenderShaderViewsDesc, RenderTargetInfo,
     },
@@ -72,24 +72,11 @@ fn test_raytrace(rt_data: RaytraceData, rg: &mut RenderGraph, output: &mut Handl
             shader_views
         };
 
-        // TODO: supply`RenderShaderArgument`s to `ray_trace` instead of here (modify API).
-        cb.update_shader_table(
-            rt_data.shader_table,
-            RenderShaderTableUpdateDesc {
-                ray_gen_entries: vec![RenderShaderTableUpdateEntry {
-                    program: None,
-                    shader_arguments: vec![RenderShaderArgument::new(raygen_shader_views)],
-                }],
-                hit_entries: Default::default(),
-                miss_entries: Default::default(),
-                pipeline_state: rt_data.pipeline_state,
-            },
-        )?;
-
         cb.ray_trace(
             rt_data.pipeline_state,
             rt_data.shader_table,
             rt_data.top_acceleration,
+            &[RenderShaderArgument::new(raygen_shader_views)],
             output_desc.width,
             output_desc.height,
             0,

@@ -1,8 +1,10 @@
 Texture2D<float4> input_tex;
 RWTexture2D<float4> output_tex;
 
+// clang-format off
 [numthreads(8, 8, 1)]
 void main(in uint2 pix : SV_DispatchThreadID) {
+    // clang-format on
     float4 res = 0.0.xxxx;
 
     for (int i = -2; i <= 2; ++i) {

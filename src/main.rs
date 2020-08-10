@@ -47,7 +47,7 @@ fn create_swap_chain(
     height: u32,
 ) -> anyhow::Result<RenderResourceHandle> {
     let swapchain = handles.allocate(RenderResourceType::SwapChain);
-    use raw_window_handle::{HasRawWindowHandle as _, RawWindowHandle};
+    use raw_window_handle::HasRawWindowHandle as _;
 
     device.create_swap_chain(
         swapchain,
@@ -56,13 +56,7 @@ fn create_swap_chain(
             height,
             format: RenderFormat::R10g10b10a2Unorm,
             buffer_count: 3,
-            window: match window.raw_window_handle() {
-                RawWindowHandle::Windows(handle) => RenderSwapChainWindow {
-                    hinstance: handle.hinstance,
-                    hwnd: handle.hwnd,
-                },
-                _ => todo!(),
-            },
+            window: window.raw_window_handle(),
         },
         "Main swap chain".into(),
     )?;
